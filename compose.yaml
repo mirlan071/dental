@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: dental-postgres
+    environment:
+      POSTGRES_DB: dental_crm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - dental_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dental_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  dental_postgres_data:
