@@ -3,5 +3,8 @@ target/
 .vscode/
 *.iml
 .env
+.env.*
+!.env.example
+!frontend/.env.example
 application-local.yml
 *.log

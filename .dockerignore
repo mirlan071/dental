@@ -1,0 +1,11 @@
+.git
+.gitignore
+.idea
+.vscode
+.local-logs
+frontend
+target
+*.log
+.env
+.env.*
+!.env.example
