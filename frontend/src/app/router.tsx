@@ -12,6 +12,7 @@ import { PatientDetailsPage } from "../patients/patient-details-page";
 import { DoctorsPage } from "../doctors/doctors-page";
 import { ServicesPage } from "../services/services-page";
 import { useAuth } from "../auth/auth-context";
+import { SettingsPage } from "../settings/settings-page";
 
 function HomeRedirect() {
   const { user } = useAuth();
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
               { path: "debtors", element: <DebtorsPage /> },
               { path: "doctors", element: <DoctorsPage /> },
               { path: "services", element: <ServicesPage /> },
+              { path: "settings", element: <SettingsPage /> },
             ],
           },
           {

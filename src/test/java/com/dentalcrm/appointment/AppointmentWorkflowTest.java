@@ -5,6 +5,7 @@ import com.dentalcrm.doctor.*;
 import com.dentalcrm.patient.*;
 import com.dentalcrm.payment.*;
 import com.dentalcrm.service.*;
+import com.dentalcrm.settings.ClinicSettingsService;
 import com.dentalcrm.user.*;
 import org.junit.jupiter.api.*;
 import org.springframework.security.access.AccessDeniedException;
@@ -26,6 +27,7 @@ class AppointmentWorkflowTest {
     private DoctorRepository doctorRepository;
     private AppointmentManager manager;
     private Appointment appointment;
+    private ClinicSettingsService clinicSettings;
 
     @BeforeEach
     void setUp() {
@@ -33,8 +35,10 @@ class AppointmentWorkflowTest {
         items = mock(AppointmentServiceItemRepository.class);
         payments = mock(PaymentRepository.class);
         doctorRepository = mock(DoctorRepository.class);
+        clinicSettings = mock(ClinicSettingsService.class);
         manager = new AppointmentManager(appointments, items, payments, mock(PatientService.class),
-                mock(DoctorService.class), mock(ClinicServiceManager.class), mock(UserRepository.class), doctorRepository);
+                mock(DoctorService.class), mock(ClinicServiceManager.class), mock(UserRepository.class), doctorRepository,
+                clinicSettings);
         appointment = appointment(10L, 20L, AppointmentStatus.SCHEDULED);
         when(appointments.findById(10L)).thenReturn(Optional.of(appointment));
         when(items.findByAppointmentId(anyLong())).thenReturn(List.of());
@@ -113,7 +117,7 @@ class AppointmentWorkflowTest {
     void inactiveDoctorCannotBeAssignedToNewAppointment() {
         PatientService patientService=mock(PatientService.class); DoctorService doctorService=mock(DoctorService.class);
         ClinicServiceManager serviceManager=mock(ClinicServiceManager.class); UserRepository userRepository=mock(UserRepository.class);
-        AppointmentManager createManager=new AppointmentManager(appointments,items,payments,patientService,doctorService,serviceManager,userRepository,doctorRepository);
+        AppointmentManager createManager=new AppointmentManager(appointments,items,payments,patientService,doctorService,serviceManager,userRepository,doctorRepository,clinicSettings);
         Doctor inactive=appointment.getDoctor();inactive.getUser().setActive(false);
         when(doctorService.get(20L)).thenReturn(inactive);when(patientService.get(30L)).thenReturn(appointment.getPatient());
         User adminUser=new User();adminUser.setUsername("admin");when(userRepository.findByUsernameIgnoreCase("admin")).thenReturn(Optional.of(adminUser));

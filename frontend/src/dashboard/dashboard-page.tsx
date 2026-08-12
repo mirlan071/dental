@@ -13,7 +13,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { clinicPeriodRange, type DashboardPeriod } from "../lib/clinic-date";
-import { cn, formatDateTime, formatMoney } from "../lib/utils";
+import { cn, formatCompactDateTime, formatMoney } from "../lib/utils";
 import type { DashboardSummary, DebtorSummary } from "../types/api";
 import { Card } from "../components/ui/card";
 import { PageHeader } from "../components/page-header";
@@ -212,7 +212,7 @@ function DashboardContent({
                 <Cell>{formatMoney(d.totalTreatmentAmount)}</Cell>
                 <Cell>{formatMoney(d.totalPaid)}</Cell>
                 <Cell debt>{formatMoney(d.totalDebt)}</Cell>
-                <Cell>{formatDateTime(d.lastTreatmentDate)}</Cell>
+                <Cell>{formatCompactDateTime(d.lastTreatmentDate)}</Cell>
               </tr>
             ))}
           </Table>

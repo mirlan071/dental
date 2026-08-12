@@ -10,6 +10,7 @@ import {
   Users,
   UserRoundCog,
   Wrench,
+  Settings,
   X,
 } from "lucide-react";
 import { useAuth } from "../auth/auth-context";
@@ -22,6 +23,7 @@ const adminNav = [
   { to: "/debtors", label: "Должники", icon: CircleDollarSign },
   { to: "/doctors", label: "Врачи", icon: UserRoundCog },
   { to: "/services", label: "Услуги", icon: Wrench },
+  { to: "/settings", label: "Настройки", icon: Settings },
 ];
 const doctorNav = [
   { to: "/my-day", label: "Мой день", icon: LayoutDashboard },
@@ -102,7 +104,7 @@ export function AppShell() {
         />
       )}
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-20 flex h-16 items-center border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-6 lg:px-8">
           <button
             className="rounded-lg border border-slate-200 p-2 text-slate-600 lg:hidden"
             onClick={() => setOpen(true)}
@@ -110,17 +112,9 @@ export function AppShell() {
           >
             <Menu size={20} />
           </button>
-          <p className="hidden text-sm text-slate-500 sm:block">
+          <p className="hidden text-sm text-slate-500 sm:ml-4 sm:block lg:ml-0">
             Стоматологическая клиника
           </p>
-          <div className="text-right">
-            <p className="text-sm font-medium text-slate-800">
-              {user?.fullName}
-            </p>
-            <p className="text-xs text-slate-500">
-              {user?.role === "ADMIN" ? "Администратор" : "Врач"}
-            </p>
-          </div>
         </header>
         <main className="mx-auto max-w-[1440px] p-4 sm:p-6 lg:p-8">
           <Outlet />

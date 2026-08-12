@@ -5,6 +5,7 @@ import com.dentalcrm.doctor.*;
 import com.dentalcrm.patient.*;
 import com.dentalcrm.payment.*;
 import com.dentalcrm.service.*;
+import com.dentalcrm.settings.ClinicSettingsService;
 import com.dentalcrm.user.*;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
@@ -36,10 +37,12 @@ public class AppointmentManager {
     private final ClinicServiceManager services;
     private final UserRepository users;
     private final DoctorRepository doctorRepo;
+    private final ClinicSettingsService clinicSettings;
 
     public AppointmentManager(AppointmentRepository repo, AppointmentServiceItemRepository items,
                               PaymentRepository payments, PatientService patients, DoctorService doctors,
-                              ClinicServiceManager services, UserRepository users, DoctorRepository doctorRepo) {
+                              ClinicServiceManager services, UserRepository users, DoctorRepository doctorRepo,
+                              ClinicSettingsService clinicSettings) {
         this.repo = repo;
         this.items = items;
         this.payments = payments;
@@ -48,6 +51,7 @@ public class AppointmentManager {
         this.services = services;
         this.users = users;
         this.doctorRepo = doctorRepo;
+        this.clinicSettings = clinicSettings;
     }
 
     public AppointmentResponse create(AppointmentRequest request, Authentication auth) {
@@ -167,6 +171,7 @@ public class AppointmentManager {
 
     private void validateTime(OffsetDateTime start, OffsetDateTime end) {
         if (!end.isAfter(start)) throw new IllegalArgumentException("endTime must be after startTime");
+        clinicSettings.validateAppointmentTime(start, end);
     }
 
     private void ensureDoctorAccess(Long doctorId, Authentication auth) {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { formatDateTime, formatMoney } from "../lib/utils";
+import { formatCompactDateTime, formatMoney } from "../lib/utils";
 import type { DebtorSummary } from "../types/api";
 import { PageHeader } from "../components/page-header";
 import { Card } from "../components/ui/card";
@@ -77,7 +77,7 @@ export function DebtorsPage() {
                     {formatMoney(d.totalDebt)}
                   </td>
                   <td className="px-5 py-4">
-                    {formatDateTime(d.lastTreatmentDate)}
+                    {formatCompactDateTime(d.lastTreatmentDate)}
                   </td>
                 </tr>
               ))}

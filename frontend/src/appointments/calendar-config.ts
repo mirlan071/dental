@@ -1,6 +1,4 @@
 export const CALENDAR_CONFIG = {
-  workdayStart: "09:00",
-  workdayEnd: "18:00",
   slotMinutes: 30,
   hourHeight: 88,
   doctorColumnWidth: 240,

@@ -63,10 +63,6 @@ public class DevDataSeeder implements CommandLineRunner {
 
     private void ensureBaseAccounts() {
         if (users.findByUsernameIgnoreCase("admin").isEmpty()) users.save(user("admin","admin123","Администратор клиники",Role.ADMIN,true));
-        if (users.findByUsernameIgnoreCase("doctor").isEmpty()) {
-            User account=users.save(user("doctor",DEV_DOCTOR_PASSWORD,"Айзада Омурова",Role.DOCTOR,true));
-            doctors.save(doctor(account,"Стоматолог терапевт","+996 555 100 101"));
-        }
     }
 
     private List<Doctor> ensureDoctors() {
