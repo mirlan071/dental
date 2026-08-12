@@ -34,6 +34,7 @@ server:
 
 app:
   frontend-url: ${APP_FRONTEND_URL}
+  load-demo-data: ${APP_LOAD_DEMO_DATA:false}
   bootstrap-admin:
     username: ${APP_BOOTSTRAP_ADMIN_USERNAME:}
     password: ${APP_BOOTSTRAP_ADMIN_PASSWORD:}

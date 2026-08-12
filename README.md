@@ -31,7 +31,7 @@ Local services are available at `localhost:5173` (frontend), `localhost:8080` (b
 
 Set `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` to override the local datasource defaults when needed.
 
-The `dev` profile inserts sample users (`admin/admin123`, `doctor/doctor123`). Change these credentials outside local development.
+The `dev` profile inserts `admin/admin123` plus the realistic demo dataset and demo doctor accounts documented below. These credentials are only for demo/development use.
 
 Authentication is session-based. `POST /api/auth/login` with JSON credentials, then reuse the returned `JSESSIONID` cookie.
 Before state-changing requests, call `GET /api/auth/csrf` and send its token in the returned header name.
@@ -71,6 +71,15 @@ For the first production administrator, optionally set all three variables befor
 - `APP_BOOTSTRAP_ADMIN_FULL_NAME`
 
 The account is created only when no ADMIN exists. Remove the bootstrap password from the hosting environment after successful initialization. Development demo data is restricted to the `dev` profile.
+
+To load the realistic presentation dataset once in production, start the application with both:
+
+- `SPRING_PROFILES_ACTIVE=prod`
+- `APP_LOAD_DEMO_DATA=true`
+
+The seed requires an existing ADMIN, never changes that account, and records completion in `app_data_seeds` so later restarts do not duplicate records. Set `APP_LOAD_DEMO_DATA=false` again after the successful startup. A fresh database with an ADMIN receives 5 active demo doctors, 1 inactive demo doctor, 11 services, 50 patients, about 108 appointments, and roughly 56–70 payments (the exact payment count depends on the time of day when today's appointments are seeded).
+
+The active demo doctor usernames are `demo.aizada`, `demo.azamat`, `demo.ruslan`, `demo.aibek`, and `demo.nuriza`. The inactive account is `demo.bakyt`. These clearly demo-only accounts use the shared password `DemoClinic-2026!`; passwords are BCrypt-hashed and are never written to application logs.
 
 Build the backend container from the repository root:
 

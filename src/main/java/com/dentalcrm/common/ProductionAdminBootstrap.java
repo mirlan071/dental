@@ -5,12 +5,14 @@ import org.slf4j.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
 @Profile("prod")
+@Order(0)
 public class ProductionAdminBootstrap implements CommandLineRunner {
     private static final Logger log = LoggerFactory.getLogger(ProductionAdminBootstrap.class);
 
