@@ -1,0 +1,8 @@
+package com.dentalcrm.payment;
+import com.dentalcrm.appointment.*; import com.dentalcrm.common.NotFoundException; import org.springframework.security.core.Authentication; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional; import java.util.List; import static com.dentalcrm.payment.PaymentDtos.*;
+@Service @Transactional public class PaymentService {private final PaymentRepository repo;private final AppointmentRepository appointments;private final AppointmentManager appointmentManager;public PaymentService(PaymentRepository r,AppointmentRepository a,AppointmentManager am){repo=r;appointments=a;appointmentManager=am;}
+ public PaymentResponse create(PaymentRequest r,Authentication auth){appointmentManager.find(r.appointmentId(),auth);Payment p=new Payment();p.setAppointment(appointments.findById(r.appointmentId()).orElseThrow());p.setAmount(r.amount());p.setPaymentMethod(r.paymentMethod());p.setPaidAt(r.paidAt());return map(repo.save(p));}
+ @Transactional(readOnly=true) public List<PaymentResponse> forAppointment(Long appointmentId,Authentication auth){appointmentManager.find(appointmentId,auth);return repo.findByAppointmentIdOrderByPaidAt(appointmentId).stream().map(this::map).toList();}
+ @Transactional(readOnly=true) public PaymentResponse find(Long id,Authentication auth){Payment p=repo.findById(id).orElseThrow(()->new NotFoundException("Payment not found: "+id));appointmentManager.find(p.getAppointment().getId(),auth);return map(p);}
+ private PaymentResponse map(Payment p){return new PaymentResponse(p.getId(),p.getAppointment().getId(),p.getAmount(),p.getPaymentMethod(),p.getPaidAt(),p.getCreatedAt());}
+}

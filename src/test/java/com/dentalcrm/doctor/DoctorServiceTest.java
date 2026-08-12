@@ -1,0 +1,7 @@
+package com.dentalcrm.doctor;
+import com.dentalcrm.common.ConflictException; import com.dentalcrm.user.*; import org.junit.jupiter.api.*; import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder; import java.util.Optional; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
+class DoctorServiceTest {private DoctorRepository doctors;private UserRepository users;private DoctorService service;
+ @BeforeEach void setup(){doctors=mock(DoctorRepository.class);users=mock(UserRepository.class);when(users.save(any())).thenAnswer(i->{User u=i.getArgument(0);u.setId(1L);return u;});when(doctors.save(any())).thenAnswer(i->{Doctor d=i.getArgument(0);d.setId(2L);return d;});service=new DoctorService(doctors,users,new BCryptPasswordEncoder());}
+ @Test void createsDoctorWithBcryptPassword(){var response=service.create(new UserDtos.CreateDoctorUserRequest("dentist","password1","Doctor One","Therapist","123"));var captor=org.mockito.ArgumentCaptor.forClass(User.class);verify(users).save(captor.capture());assertTrue(new BCryptPasswordEncoder().matches("password1",captor.getValue().getPasswordHash()));assertEquals(Role.DOCTOR,captor.getValue().getRole());assertEquals(2L,response.id());}
+ @Test void rejectsDuplicateUsername(){when(users.existsByUsernameIgnoreCase("dentist")).thenReturn(true);assertThrows(ConflictException.class,()->service.create(new UserDtos.CreateDoctorUserRequest("dentist","password1","Doctor One",null,null)));verify(doctors,never()).save(any());}
+}

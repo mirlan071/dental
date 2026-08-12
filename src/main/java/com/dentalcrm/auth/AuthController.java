@@ -1,0 +1,12 @@
+package com.dentalcrm.auth;
+import com.dentalcrm.common.NotFoundException; import com.dentalcrm.user.UserRepository; import jakarta.servlet.http.*; import jakarta.validation.Valid; import org.springframework.http.HttpStatus; import org.springframework.security.authentication.*; import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration; import org.springframework.security.core.Authentication; import org.springframework.security.core.context.*; import org.springframework.security.web.context.HttpSessionSecurityContextRepository; import org.springframework.security.web.csrf.CsrfToken; import org.springframework.web.bind.annotation.*; import java.util.Map;
+@RestController @RequestMapping("/api/auth")
+public class AuthController {
+ private final AuthenticationManager manager; private final UserRepository users;
+ public AuthController(AuthenticationConfiguration c,UserRepository users) throws Exception {this.manager=c.getAuthenticationManager();this.users=users;}
+ @PostMapping("/login") public AuthResponse login(@Valid @RequestBody LoginRequest request,HttpServletRequest servletRequest){Authentication auth=manager.authenticate(UsernamePasswordAuthenticationToken.unauthenticated(request.username(),request.password()));SecurityContext context=SecurityContextHolder.createEmptyContext();context.setAuthentication(auth);SecurityContextHolder.setContext(context);servletRequest.getSession(true).setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,context);return current(auth);}
+ @GetMapping("/me") public AuthResponse me(Authentication auth){return current(auth);}
+ @GetMapping("/csrf") public Map<String,String> csrf(CsrfToken token){return Map.of("token",token.getToken(),"headerName",token.getHeaderName());}
+ @PostMapping("/logout") @ResponseStatus(HttpStatus.NO_CONTENT) public void logout(HttpServletRequest req){var session=req.getSession(false);if(session!=null)session.invalidate();SecurityContextHolder.clearContext();}
+ private AuthResponse current(Authentication auth){var u=users.findByUsernameIgnoreCase(auth.getName()).orElseThrow(()->new NotFoundException("User not found"));return new AuthResponse(u.getId(),u.getUsername(),u.getFullName(),u.getRole());}
+}
