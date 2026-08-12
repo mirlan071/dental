@@ -5,6 +5,7 @@ export type PaymentMethod = "CASH" | "CARD" | "QR";
 export interface AuthUser { id: number; username: string; fullName: string; role: Role }
 export interface ApiErrorBody { timestamp: string; status: number; error: string; message: string; path: string; validationErrors?: Record<string, string> }
 export interface DashboardSummary { from: string; to: string; totalPatients: number; appointments: number; completedAppointments: number; cancelledAppointments: number; clinicRevenue: number; cashRevenue: number; cardRevenue: number; qrRevenue: number }
+export interface DoctorDashboardSummary { from: string; to: string; patients: number; completedAppointments: number; revenue: number; averageCheck: number; payments: { cash: number; card: number; qr: number } }
 export interface AppointmentServiceItem { id: number; serviceId: number; serviceName: string; quantity: number; unitPrice: number; lineTotal: number }
 export interface AppointmentPayment { id: number; amount: number; paymentMethod: PaymentMethod; paidAt: string }
 export interface Appointment { id: number; patientId: number; patientName: string; doctorId: number; doctorName: string; startTime: string; endTime: string; status: AppointmentStatus; notes: string | null; createdAt: string; createdBy: string; services: AppointmentServiceItem[]; servicesTotal: number; payments: AppointmentPayment[]; paidTotal: number; remainingBalance: number }

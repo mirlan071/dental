@@ -1,0 +1,35 @@
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Banknote, CheckCircle2, CreditCard, QrCode, ReceiptText, Users } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
+import { clinicDayRange, clinicPeriodRange, clinicToday, type DashboardPeriod } from "../lib/clinic-date";
+import { cn, formatMoney, formatTime } from "../lib/utils";
+import type { Appointment, AppointmentStatus, DoctorDashboardSummary } from "../types/api";
+import { PageHeader } from "../components/page-header";
+import { Card } from "../components/ui/card";
+import { Button } from "../components/ui/button";
+import { EmptyState, ErrorState, LoadingState } from "../components/feedback";
+import { StatusBadge } from "../components/status-badge";
+
+const periods:{value:DashboardPeriod;label:string}[]=[{value:"today",label:"Сегодня"},{value:"week",label:"Неделя"},{value:"month",label:"Месяц"}];
+
+export function DoctorDashboardPage(){
+  const[period,setPeriod]=useState<DashboardPeriod>("today");
+  const range=clinicPeriodRange(period);
+  const todayRange=clinicDayRange();
+  const summary=useQuery({queryKey:["dashboard","doctor",period,range.from],queryFn:()=>api<DoctorDashboardSummary>(`/api/dashboard/doctor?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`)});
+  const appointments=useQuery({queryKey:["appointments",clinicToday()],queryFn:()=>api<Appointment[]>(`/api/appointments?from=${encodeURIComponent(todayRange.from)}&to=${encodeURIComponent(todayRange.to)}`)});
+  return <><PageHeader title="Мой день" description="Личные показатели и расписание" actions={<div className="flex rounded-lg border border-slate-200 bg-white p-1">{periods.map(item=><button key={item.value} onClick={()=>setPeriod(item.value)} className={cn("rounded-md px-3 py-1.5 text-sm font-medium",period===item.value?"bg-slate-900 text-white":"text-slate-600 hover:bg-slate-50")}>{item.label}</button>)}</div>}/>{summary.isLoading||appointments.isLoading?<LoadingState/>:summary.error?<ErrorState error={summary.error}/>:appointments.error?<ErrorState error={appointments.error}/>:summary.data&&<DoctorDashboardContent summary={summary.data} appointments={appointments.data??[]}/>}</>
+}
+
+function DoctorDashboardContent({summary,appointments}:{summary:DoctorDashboardSummary;appointments:Appointment[]}){
+  const navigate=useNavigate();
+  const client=useQueryClient();
+  const[nextError,setNextError]=useState<Error|null>(null);
+  const now=Date.now();
+  const next=useMemo(()=>appointments.filter(item=>item.status==="SCHEDULED"&&new Date(item.startTime).getTime()>now).sort((a,b)=>a.startTime.localeCompare(b.startTime))[0],[appointments,now]);
+  const mutation=useMutation({mutationFn:({id,status}:{id:number;status:AppointmentStatus})=>api<Appointment>(`/api/appointments/${id}/status`,{method:"PATCH",body:JSON.stringify({status})}),onSuccess:async appointment=>{setNextError(null);await Promise.all([client.invalidateQueries({queryKey:["dashboard"]}),client.invalidateQueries({queryKey:["appointments"]}),client.invalidateQueries({queryKey:["appointment",String(appointment.id)]})])},onError:setNextError});
+  const metrics=[{label:"Пациенты",value:String(summary.patients),icon:Users},{label:"Завершено",value:String(summary.completedAppointments),icon:CheckCircle2},{label:"Выручка",value:formatMoney(summary.revenue),icon:Banknote},{label:"Средний чек",value:formatMoney(summary.averageCheck),icon:ReceiptText}];
+  return <div className="space-y-6">{next&&<Card className="border-brand-200 bg-brand-50 p-5"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><p className="text-sm font-medium text-brand-800">Следующий пациент</p><div className="mt-2 flex items-baseline gap-3"><span className="text-2xl font-semibold text-slate-950">{formatTime(next.startTime)}</span><span className="text-lg font-medium text-slate-900">{next.patientName}</span></div>{next.services[0]&&<p className="mt-1 text-sm text-slate-600">{next.services.map(service=>service.serviceName).join(", ")}</p>}</div><Button onClick={()=>mutation.mutate({id:next.id,status:"IN_PROGRESS"})} disabled={mutation.isPending}>Начать приём</Button></div></Card>}{nextError&&<ErrorState error={nextError}/>}<div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(({label,value,icon:Icon})=><Card className="p-5" key={label}><div className="flex items-start justify-between"><div><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{value}</p></div><span className="grid size-10 place-items-center rounded-lg bg-brand-50 text-brand-700"><Icon size={20}/></span></div></Card>)}</div><Card><div className="border-b border-slate-200 px-5 py-4"><h2 className="font-semibold text-slate-900">Оплаты по способам</h2><p className="mt-1 text-sm text-slate-500">Платежи по вашим приёмам за выбранный период</p></div><div className="grid divide-y divide-slate-200 sm:grid-cols-3 sm:divide-x sm:divide-y-0">{[{label:"Наличные",value:summary.payments.cash,icon:Banknote},{label:"Карта",value:summary.payments.card,icon:CreditCard},{label:"QR",value:summary.payments.qr,icon:QrCode}].map(({label,value,icon:Icon})=><div className="flex items-center gap-4 p-5" key={label}><span className="grid size-10 place-items-center rounded-lg bg-slate-100 text-slate-600"><Icon size={20}/></span><div><p className="text-sm text-slate-500">{label}</p><p className="mt-0.5 text-lg font-semibold text-slate-900">{formatMoney(value)}</p></div></div>)}</div></Card><Card><div className="border-b border-slate-200 px-5 py-4"><h2 className="font-semibold text-slate-900">Приёмы сегодня</h2><p className="mt-1 text-sm text-slate-500">Расписание по времени</p></div>{appointments.length?<div className="divide-y divide-slate-100">{appointments.map(item=><div key={item.id} className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center"><button onClick={()=>navigate(`/appointments/${item.id}`)} className="flex min-w-0 flex-1 items-center gap-4 text-left"><span className="w-12 shrink-0 font-semibold text-slate-950">{formatTime(item.startTime)}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium text-slate-900">{item.patientName}</span>{item.services.length>0&&<span className="block truncate text-xs text-slate-500">{item.services.map(service=>service.serviceName).join(", ")}</span>}</span><StatusBadge status={item.status}/></button>{item.status==="SCHEDULED"&&<Button size="sm" onClick={()=>mutation.mutate({id:item.id,status:"IN_PROGRESS"})} disabled={mutation.isPending}>Начать приём</Button>}{item.status==="IN_PROGRESS"&&<Button size="sm" onClick={()=>mutation.mutate({id:item.id,status:"COMPLETED"})} disabled={mutation.isPending}>Завершить приём</Button>}</div>)}</div>:<div className="p-5"><EmptyState title="Сегодня приёмов нет" text="Расписание на сегодня свободно"/></div>}</Card></div>
+}
