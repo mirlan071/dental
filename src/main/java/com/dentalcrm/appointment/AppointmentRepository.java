@@ -5,5 +5,6 @@ public interface AppointmentRepository extends JpaRepository<Appointment,Long>{
  boolean hasConflict(@Param("doctorId") Long doctorId,@Param("startTime") OffsetDateTime startTime,@Param("endTime") OffsetDateTime endTime,@Param("excludeId") Long excludeId);
  List<Appointment> findByDoctorIdAndStartTimeBetweenOrderByStartTime(Long doctorId,OffsetDateTime from,OffsetDateTime to);
  List<Appointment> findByStartTimeBetweenOrderByStartTime(OffsetDateTime from,OffsetDateTime to);
+ List<Appointment> findByStatusOrderByStartTimeDesc(AppointmentStatus status);
  @Lock(LockModeType.PESSIMISTIC_WRITE) @Query("select a from Appointment a where a.id=:id") Optional<Appointment> findByIdForUpdate(@Param("id") Long id);
 }

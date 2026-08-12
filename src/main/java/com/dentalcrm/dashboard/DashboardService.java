@@ -2,15 +2,15 @@ package com.dentalcrm.dashboard;
 
 import com.dentalcrm.appointment.*;
 import com.dentalcrm.common.NotFoundException;
-import com.dentalcrm.doctor.DoctorRepository;
-import com.dentalcrm.patient.PatientRepository;
+import com.dentalcrm.doctor.*;
+import com.dentalcrm.patient.*;
 import com.dentalcrm.payment.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.*;
 import java.time.OffsetDateTime;
-import java.util.List;
+import java.util.*;
 
 import static com.dentalcrm.dashboard.DashboardDtos.*;
 
@@ -18,13 +18,16 @@ import static com.dentalcrm.dashboard.DashboardDtos.*;
 public class DashboardService {
     private final PatientRepository patients;
     private final AppointmentRepository appointments;
+    private final AppointmentServiceItemRepository serviceItems;
     private final PaymentRepository payments;
     private final DoctorRepository doctors;
 
     public DashboardService(PatientRepository patients, AppointmentRepository appointments,
-                            PaymentRepository payments, DoctorRepository doctors) {
+                            AppointmentServiceItemRepository serviceItems, PaymentRepository payments,
+                            DoctorRepository doctors) {
         this.patients = patients;
         this.appointments = appointments;
+        this.serviceItems = serviceItems;
         this.payments = payments;
         this.doctors = doctors;
     }
@@ -32,15 +35,25 @@ public class DashboardService {
     @Transactional(readOnly = true)
     public DashboardSummary summary(OffsetDateTime from, OffsetDateTime to) {
         validateRange(from, to);
-        var periodAppointments = appointments.findByStartTimeBetweenOrderByStartTime(from, to);
-        var periodPayments = payments.findByPaidAtBetween(from, to);
-        BigDecimal cash = sum(periodPayments, PaymentMethod.CASH);
-        BigDecimal card = sum(periodPayments, PaymentMethod.CARD);
-        BigDecimal qr = sum(periodPayments, PaymentMethod.QR);
-        return new DashboardSummary(from, to, patients.count(), periodAppointments.size(),
-                periodAppointments.stream().filter(a -> a.getStatus() == AppointmentStatus.COMPLETED).count(),
-                periodAppointments.stream().filter(a -> a.getStatus() == AppointmentStatus.CANCELLED).count(),
-                cash.add(card).add(qr), cash, card, qr);
+        var period = appointments.findByStartTimeBetweenOrderByStartTime(from, to);
+        var completed = period.stream().filter(a -> a.getStatus() == AppointmentStatus.COMPLETED).toList();
+        List<Payment> completedPayments = completed.stream().flatMap(a -> paymentList(a).stream()).toList();
+        BigDecimal cash = sum(completedPayments, PaymentMethod.CASH);
+        BigDecimal card = sum(completedPayments, PaymentMethod.CARD);
+        BigDecimal qr = sum(completedPayments, PaymentMethod.QR);
+        BigDecimal performed = completed.stream().map(this::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal received = cash.add(card).add(qr);
+        BigDecimal periodOutstanding = completed.stream().map(this::remaining).reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<DebtorSummary> debtors = debtors(null);
+        BigDecimal totalDebt = debtors.stream().map(DebtorSummary::totalDebt).reduce(BigDecimal.ZERO, BigDecimal::add);
+        long periodPatients = period.stream()
+                .filter(a -> a.getStatus() != AppointmentStatus.CANCELLED && a.getStatus() != AppointmentStatus.NO_SHOW)
+                .map(a -> a.getPatient().getId()).distinct().count();
+
+        return new DashboardSummary(from, to, periodPatients, period.size(), completed.size(),
+                period.stream().filter(a -> a.getStatus() == AppointmentStatus.CANCELLED).count(),
+                received, cash, card, qr, performed, received, periodOutstanding,
+                debtors.size(), totalDebt, doctorPerformance(from, to));
     }
 
     @Transactional(readOnly = true)
@@ -52,33 +65,91 @@ public class DashboardService {
                 .findByDoctorIdAndStartTimeBetweenOrderByStartTime(doctor.getId(), from, to);
         List<Payment> periodPayments = payments
                 .findByAppointmentDoctorIdAndPaidAtBetween(doctor.getId(), from, to);
-
         long patientCount = periodAppointments.stream()
                 .filter(a -> a.getStatus() != AppointmentStatus.CANCELLED && a.getStatus() != AppointmentStatus.NO_SHOW)
-                .map(a -> a.getPatient().getId())
-                .distinct()
-                .count();
-        long completedCount = periodAppointments.stream()
-                .filter(a -> a.getStatus() == AppointmentStatus.COMPLETED)
-                .count();
+                .map(a -> a.getPatient().getId()).distinct().count();
+        long completedCount = periodAppointments.stream().filter(a -> a.getStatus() == AppointmentStatus.COMPLETED).count();
         BigDecimal cash = sum(periodPayments, PaymentMethod.CASH);
         BigDecimal card = sum(periodPayments, PaymentMethod.CARD);
         BigDecimal qr = sum(periodPayments, PaymentMethod.QR);
         BigDecimal revenue = cash.add(card).add(qr);
-        BigDecimal averageCheck = completedCount == 0
-                ? BigDecimal.ZERO.setScale(2)
+        BigDecimal averageCheck = completedCount == 0 ? BigDecimal.ZERO.setScale(2)
                 : revenue.divide(BigDecimal.valueOf(completedCount), 2, RoundingMode.HALF_UP);
-
         return new DoctorDashboardSummary(from, to, patientCount, completedCount, revenue, averageCheck,
                 new DoctorPaymentBreakdown(cash, card, qr));
     }
 
-    private BigDecimal sum(List<Payment> source, PaymentMethod method) {
-        return source.stream().filter(payment -> payment.getPaymentMethod() == method)
-                .map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+    @Transactional(readOnly = true)
+    public List<DebtorSummary> debtors(String search) {
+        String term = search == null ? "" : search.trim().toLowerCase(Locale.ROOT);
+        return currentDebtAppointments().stream().collect(java.util.stream.Collectors.groupingBy(a -> a.getPatient().getId()))
+                .values().stream().map(this::debtorSummary)
+                .filter(d -> term.isBlank() || d.patientFullName().toLowerCase(Locale.ROOT).contains(term)
+                        || d.phone().toLowerCase(Locale.ROOT).contains(term))
+                .sorted(Comparator.comparing(DebtorSummary::totalDebt).reversed()
+                        .thenComparing(DebtorSummary::lastTreatmentDate, Comparator.reverseOrder())).toList();
     }
 
-    private void validateRange(OffsetDateTime from, OffsetDateTime to) {
-        if (!to.isAfter(from)) throw new IllegalArgumentException("to must be after from");
+    @Transactional(readOnly = true)
+    public PatientDebtDetails patientDebt(Long patientId) {
+        Patient patient = patients.findById(patientId).orElseThrow(() -> new NotFoundException("Patient not found: " + patientId));
+        List<Appointment> debtAppointments = currentDebtAppointments().stream()
+                .filter(a -> a.getPatient().getId().equals(patientId)).toList();
+        List<DebtAppointment> details = debtAppointments.stream().map(this::debtAppointment).toList();
+        return new PatientDebtDetails(patient.getId(), patient.getFullName(), patient.getPhone(),
+                details.stream().map(DebtAppointment::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add),
+                details.stream().map(DebtAppointment::paid).reduce(BigDecimal.ZERO, BigDecimal::add),
+                details.stream().map(DebtAppointment::remainingBalance).reduce(BigDecimal.ZERO, BigDecimal::add), details);
     }
+
+    private List<DoctorPerformance> doctorPerformance(OffsetDateTime from, OffsetDateTime to) {
+        return doctors.findByUserActiveTrueOrderByUserFullName().stream().map(doctor -> {
+            List<Appointment> period = appointments.findByDoctorIdAndStartTimeBetweenOrderByStartTime(doctor.getId(), from, to);
+            List<Appointment> completed = period.stream().filter(a -> a.getStatus() == AppointmentStatus.COMPLETED).toList();
+            long patientCount = completed.stream().map(a -> a.getPatient().getId()).distinct().count();
+            BigDecimal performed = completed.stream().map(this::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal received = completed.stream().flatMap(a -> paymentList(a).stream()).map(Payment::getAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal outstanding = completed.stream().map(this::remaining).reduce(BigDecimal.ZERO, BigDecimal::add);
+            return new DoctorPerformance(doctor.getId(), doctor.getUser().getFullName(), patientCount,
+                    completed.size(), performed, received, outstanding);
+        }).sorted(Comparator.comparing(DoctorPerformance::servicesPerformed).reversed()).toList();
+    }
+
+    private List<Appointment> currentDebtAppointments() {
+        return appointments.findByStatusOrderByStartTimeDesc(AppointmentStatus.COMPLETED).stream()
+                .filter(a -> remaining(a).compareTo(BigDecimal.ZERO) > 0).toList();
+    }
+
+    private DebtorSummary debtorSummary(List<Appointment> source) {
+        Appointment newest = source.stream().max(Comparator.comparing(Appointment::getStartTime)).orElseThrow();
+        List<DebtorDoctor> involved = source.stream().map(Appointment::getDoctor)
+                .collect(java.util.stream.Collectors.toMap(Doctor::getId,
+                        d -> new DebtorDoctor(d.getId(), d.getUser().getFullName()), (a, b) -> a, LinkedHashMap::new))
+                .values().stream().toList();
+        BigDecimal treatment = source.stream().map(this::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal paid = source.stream().map(this::paidTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+        return new DebtorSummary(newest.getPatient().getId(), newest.getPatient().getFullName(), newest.getPatient().getPhone(),
+                treatment, paid, treatment.subtract(paid).max(BigDecimal.ZERO), newest.getStartTime(), source.size(), involved);
+    }
+
+    private DebtAppointment debtAppointment(Appointment appointment) {
+        List<AppointmentServiceItem> items = serviceItems.findByAppointmentId(appointment.getId());
+        BigDecimal total = items.stream().map(AppointmentServiceItem::lineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal paid = paidTotal(appointment);
+        return new DebtAppointment(appointment.getId(), appointment.getStartTime(), appointment.getDoctor().getId(),
+                appointment.getDoctor().getUser().getFullName(), items.stream().map(i -> i.getService().getName()).toList(),
+                total, paid, total.subtract(paid).max(BigDecimal.ZERO), appointment.getStatus());
+    }
+
+    private BigDecimal appointmentTotal(Appointment appointment) {
+        return serviceItems.findByAppointmentId(appointment.getId()).stream().map(AppointmentServiceItem::lineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private List<Payment> paymentList(Appointment appointment) { return payments.findByAppointmentIdOrderByPaidAt(appointment.getId()); }
+    private BigDecimal paidTotal(Appointment appointment) { return paymentList(appointment).stream().map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add); }
+    private BigDecimal remaining(Appointment appointment) { return appointmentTotal(appointment).subtract(paidTotal(appointment)).max(BigDecimal.ZERO); }
+    private BigDecimal sum(List<Payment> source, PaymentMethod method) { return source.stream().filter(p -> p.getPaymentMethod() == method).map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add); }
+    private void validateRange(OffsetDateTime from, OffsetDateTime to) { if (!to.isAfter(from)) throw new IllegalArgumentException("to must be after from"); }
 }

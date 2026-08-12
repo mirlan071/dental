@@ -6,6 +6,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import static com.dentalcrm.dashboard.DashboardDtos.*;
 
@@ -31,5 +32,17 @@ public class DashboardController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to,
             Authentication authentication) {
         return service.doctorSummary(authentication.getName(), from, to);
+    }
+
+    @GetMapping("/debtors")
+    @PreAuthorize("hasRole('ADMIN')")
+    public List<DebtorSummary> debtors(@RequestParam(required = false) String search) {
+        return service.debtors(search);
+    }
+
+    @GetMapping("/debtors/{patientId}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public PatientDebtDetails debtor(@PathVariable Long patientId) {
+        return service.patientDebt(patientId);
     }
 }
