@@ -1,0 +1,3 @@
+package com.dentalcrm.common;
+import com.dentalcrm.user.*; import org.junit.jupiter.api.Test; import java.util.Optional; import static org.junit.jupiter.api.Assertions.*; import static org.mockito.Mockito.*;
+class SecurityConfigTest {@Test void inactiveDoctorCannotAuthenticate(){UserRepository repo=mock(UserRepository.class);User user=new User();user.setUsername("inactive");user.setPasswordHash("hash");user.setRole(Role.DOCTOR);user.setActive(false);when(repo.findByUsernameIgnoreCase("inactive")).thenReturn(Optional.of(user));var details=new SecurityConfig().userDetailsService(repo).loadUserByUsername("inactive");assertFalse(details.isEnabled());}}

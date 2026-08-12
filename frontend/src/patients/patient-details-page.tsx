@@ -1,28 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Calendar, FileText, Phone } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Calendar, FileText, Pencil, Phone } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { Dialog } from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
 import { EmptyState, ErrorState, LoadingState } from "../components/feedback";
 import { StatusBadge } from "../components/status-badge";
-import { api } from "../lib/api";
+import { api, errorMessage } from "../lib/api";
 import { useAuth } from "../auth/auth-context";
 import { formatDateTime, formatMoney } from "../lib/utils";
-import type { Patient, PatientDebtDetails } from "../types/api";
+import type { Patient, PatientDebtDetails, PatientInput } from "../types/api";
 
 export function PatientDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [editing, setEditing] = useState(false);
   const patient = useQuery({
     queryKey: ["patient", id],
     queryFn: () => api<Patient>(`/api/patients/${id}`),
-    enabled: Boolean(id) && user?.role === "ADMIN",
+    enabled: Boolean(id),
   });
   const debt = useQuery({
     queryKey: ["dashboard", "patient-debt", id],
     queryFn: () => api<PatientDebtDetails>(`/api/dashboard/debtors/${id}`),
-    enabled: Boolean(id),
+    enabled: Boolean(id) && user?.role === "ADMIN",
     retry: false,
   });
   if (patient.isLoading || (user?.role === "ADMIN" && debt.isLoading)) return <LoadingState />;
@@ -36,7 +40,7 @@ export function PatientDetailsPage() {
         Назад
       </Button>
       <div className="mt-5">
-        <h1 className="text-2xl font-semibold text-slate-950">{p.fullName}</h1>
+        <div className="flex items-start justify-between gap-4"><h1 className="text-2xl font-semibold text-slate-950">{p.fullName}</h1>{user?.role==="ADMIN"&&<Button variant="secondary" onClick={()=>setEditing(true)}><Pencil size={16}/>Редактировать пациента</Button>}</div>
         <p className="mt-1 text-sm text-slate-500">Карточка пациента №{p.id}</p>
         <div className="mt-6 grid gap-6 xl:grid-cols-[360px_1fr]">
           <Card className="h-fit divide-y divide-slate-100">
@@ -147,6 +151,9 @@ export function PatientDetailsPage() {
           ) : null}
         </div>
       </div>
+      <PatientEditDialog patient={p} open={editing} close={()=>setEditing(false)}/>
     </>
   );
 }
+
+function PatientEditDialog({patient,open,close}:{patient:Patient;open:boolean;close:()=>void}){const client=useQueryClient();const[fullName,setFullName]=useState(patient.fullName);const[phone,setPhone]=useState(patient.phone);const[birthDate,setBirthDate]=useState(patient.birthDate??"");const[notes,setNotes]=useState(patient.notes??"");const mutation=useMutation({mutationFn:(input:PatientInput)=>api<Patient>(`/api/patients/${patient.id}`,{method:"PUT",body:JSON.stringify(input)}),onSuccess:async()=>{await Promise.all([client.invalidateQueries({queryKey:["patient",String(patient.id)]}),client.invalidateQueries({queryKey:["patients"]}),client.invalidateQueries({queryKey:["dashboard"]})]);close()}});function submit(e:FormEvent){e.preventDefault();mutation.mutate({fullName,phone,birthDate:birthDate||null,notes:notes||null})}return <Dialog open={open} onOpenChange={value=>!value&&close()} title="Редактировать пациента"><form onSubmit={submit} className="space-y-4"><label className="block text-sm font-medium text-slate-700">ФИО<Input className="mt-2" value={fullName} onChange={e=>setFullName(e.target.value)} required/></label><label className="block text-sm font-medium text-slate-700">Телефон<Input className="mt-2" value={phone} onChange={e=>setPhone(e.target.value)} required/></label><label className="block text-sm font-medium text-slate-700">Дата рождения<Input className="mt-2" type="date" value={birthDate} onChange={e=>setBirthDate(e.target.value)}/></label><label className="block text-sm font-medium text-slate-700">Примечания<textarea className="mt-2 min-h-28 w-full rounded-lg border border-slate-300 p-3 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100" value={notes} onChange={e=>setNotes(e.target.value)}/></label>{mutation.error&&<p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{errorMessage(mutation.error)}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={close}>Отмена</Button><Button disabled={mutation.isPending}>{mutation.isPending?"Сохраняем…":"Сохранить"}</Button></div></form></Dialog>}

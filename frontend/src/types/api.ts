@@ -17,6 +17,9 @@ export interface Appointment { id: number; patientId: number; patientName: strin
 export interface Patient { id: number; fullName: string; phone: string; birthDate: string | null; notes: string | null; createdAt: string }
 export interface PatientInput { fullName: string; phone: string; birthDate: string | null; notes: string | null }
 export interface Doctor { id: number; userId: number; username: string; fullName: string; specialization: string | null; phone: string | null; active: boolean }
+export interface DoctorCreateInput { fullName:string; username:string; password:string; specialization:string|null; phone:string|null }
+export interface DoctorUpdateInput { fullName:string; specialization:string|null; phone:string|null }
 export interface ClinicService { id: number; name: string; price: number; durationMinutes: number; active: boolean }
+export interface ClinicServiceInput { name:string; price:number; durationMinutes:number; active:boolean }
 export interface PaymentInput { appointmentId: number; amount: number; paymentMethod: PaymentMethod; paidAt: string }
 export interface AppointmentCreateInput { patientId: number; doctorId: number; startTime: string; endTime: string; notes: string | null; services: { serviceId: number; quantity: number }[] }

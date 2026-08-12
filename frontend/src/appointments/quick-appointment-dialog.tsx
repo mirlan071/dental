@@ -25,7 +25,7 @@ export function QuickAppointmentDialog({open,onOpenChange,initial,onCreated}:{op
 
   useEffect(()=>{if(open){setDoctorId(initial.doctorId?String(initial.doctorId):"");setDate(initial.date);setTime(initial.time??CALENDAR_CONFIG.workdayStart)}},[open,initial]);
 
-  const doctors=useQuery({queryKey:["doctors"],queryFn:()=>api<Doctor[]>("/api/doctors"),enabled:open});
+  const doctors=useQuery({queryKey:["doctors","active"],queryFn:()=>api<Doctor[]>("/api/doctors?activeOnly=true"),enabled:open});
   const services=useQuery({queryKey:["services","active"],queryFn:()=>api<ClinicService[]>("/api/services?activeOnly=true"),enabled:open});
   const patients=useQuery({queryKey:["patients","booking",patientSearch],queryFn:()=>api<Patient[]>(`/api/patients?search=${encodeURIComponent(patientSearch.trim())}`),enabled:open&&patientSearch.trim().length>0});
 

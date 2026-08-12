@@ -109,6 +109,19 @@ class AppointmentWorkflowTest {
                 manager.status(10L, AppointmentStatus.IN_PROGRESS, doctor()).status());
     }
 
+    @Test
+    void inactiveDoctorCannotBeAssignedToNewAppointment() {
+        PatientService patientService=mock(PatientService.class); DoctorService doctorService=mock(DoctorService.class);
+        ClinicServiceManager serviceManager=mock(ClinicServiceManager.class); UserRepository userRepository=mock(UserRepository.class);
+        AppointmentManager createManager=new AppointmentManager(appointments,items,payments,patientService,doctorService,serviceManager,userRepository,doctorRepository);
+        Doctor inactive=appointment.getDoctor();inactive.getUser().setActive(false);
+        when(doctorService.get(20L)).thenReturn(inactive);when(patientService.get(30L)).thenReturn(appointment.getPatient());
+        User adminUser=new User();adminUser.setUsername("admin");when(userRepository.findByUsernameIgnoreCase("admin")).thenReturn(Optional.of(adminUser));
+        var request=new AppointmentDtos.AppointmentRequest(30L,20L,OffsetDateTime.now().plusDays(2),OffsetDateTime.now().plusDays(2).plusMinutes(30),null,null,List.of(),List.of());
+        assertThrows(IllegalArgumentException.class,()->createManager.create(request,admin()));
+        verify(appointments,never()).save(any());
+    }
+
     private AppointmentServiceItem serviceItem(String price, int quantity) {
         AppointmentServiceItem item = new AppointmentServiceItem();
         item.setPrice(new BigDecimal(price));

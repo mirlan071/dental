@@ -60,7 +60,9 @@ public class AppointmentManager {
 
         Appointment appointment = new Appointment();
         appointment.setPatient(patients.get(request.patientId()));
-        appointment.setDoctor(doctors.get(request.doctorId()));
+        Doctor selectedDoctor = doctors.get(request.doctorId());
+        if (!selectedDoctor.getUser().isActive()) throw new IllegalArgumentException("Inactive doctor cannot be assigned to a new appointment");
+        appointment.setDoctor(selectedDoctor);
         appointment.setStartTime(request.startTime());
         appointment.setEndTime(request.endTime());
         appointment.setStatus(AppointmentStatus.SCHEDULED);
