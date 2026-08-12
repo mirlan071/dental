@@ -6,4 +6,6 @@ public class AppointmentServiceItem {
  @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="appointment_id",nullable=false) private Appointment appointment;
  @ManyToOne(fetch=FetchType.LAZY,optional=false) @JoinColumn(name="service_id",nullable=false) private ClinicService service;
  @Column(nullable=false,precision=12,scale=2) private BigDecimal price;
+ @Column(nullable=false) private Integer quantity=1;
+ public BigDecimal lineTotal(){return price.multiply(BigDecimal.valueOf(quantity));}
 }

@@ -1,0 +1,2 @@
+import { Navigate, Outlet, useLocation } from "react-router-dom"; import { LoadingState } from "../components/feedback"; import { useAuth } from "./auth-context"; import type { Role } from "../types/api";
+export function ProtectedRoute({roles}:{roles?:Role[]}){const{user,loading}=useAuth();const location=useLocation();if(loading)return <LoadingState label="Проверяем сессию…"/>;if(!user)return <Navigate to="/login" replace state={{from:location}}/>;if(roles&&!roles.includes(user.role))return <Navigate to={user.role==="ADMIN"?"/dashboard":"/my-day"} replace/>;return <Outlet/>}

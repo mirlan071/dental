@@ -1,0 +1,4 @@
+import { AlertCircle, LoaderCircle } from "lucide-react"; import { Card } from "./ui/card"; import { errorMessage } from "../lib/api";
+export function LoadingState({ label = "Загрузка…" }: { label?: string }) { return <div className="flex min-h-48 items-center justify-center gap-2 text-sm text-slate-500"><LoaderCircle className="animate-spin" size={18}/>{label}</div>; }
+export function ErrorState({ error }: { error: unknown }) { return <Card className="flex items-start gap-3 border-red-200 bg-red-50 p-4 text-sm text-red-800"><AlertCircle className="mt-0.5 shrink-0" size={18}/><span>{errorMessage(error)}</span></Card>; }
+export function EmptyState({ title, text }: { title: string; text: string }) { return <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center"><p className="font-medium text-slate-800">{title}</p><p className="mt-1 text-sm text-slate-500">{text}</p></div>; }

@@ -1,8 +1,66 @@
 package com.dentalcrm.payment;
-import com.dentalcrm.appointment.*; import com.dentalcrm.common.NotFoundException; import org.springframework.security.core.Authentication; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional; import java.util.List; import static com.dentalcrm.payment.PaymentDtos.*;
-@Service @Transactional public class PaymentService {private final PaymentRepository repo;private final AppointmentRepository appointments;private final AppointmentManager appointmentManager;public PaymentService(PaymentRepository r,AppointmentRepository a,AppointmentManager am){repo=r;appointments=a;appointmentManager=am;}
- public PaymentResponse create(PaymentRequest r,Authentication auth){appointmentManager.find(r.appointmentId(),auth);Payment p=new Payment();p.setAppointment(appointments.findById(r.appointmentId()).orElseThrow());p.setAmount(r.amount());p.setPaymentMethod(r.paymentMethod());p.setPaidAt(r.paidAt());return map(repo.save(p));}
- @Transactional(readOnly=true) public List<PaymentResponse> forAppointment(Long appointmentId,Authentication auth){appointmentManager.find(appointmentId,auth);return repo.findByAppointmentIdOrderByPaidAt(appointmentId).stream().map(this::map).toList();}
- @Transactional(readOnly=true) public PaymentResponse find(Long id,Authentication auth){Payment p=repo.findById(id).orElseThrow(()->new NotFoundException("Payment not found: "+id));appointmentManager.find(p.getAppointment().getId(),auth);return map(p);}
- private PaymentResponse map(Payment p){return new PaymentResponse(p.getId(),p.getAppointment().getId(),p.getAmount(),p.getPaymentMethod(),p.getPaidAt(),p.getCreatedAt());}
+
+import com.dentalcrm.appointment.*;
+import com.dentalcrm.common.*;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+import static com.dentalcrm.payment.PaymentDtos.*;
+
+@Service
+@Transactional
+public class PaymentService {
+    private final PaymentRepository repo;
+    private final AppointmentRepository appointments;
+    private final AppointmentManager appointmentManager;
+
+    public PaymentService(PaymentRepository repo, AppointmentRepository appointments, AppointmentManager appointmentManager) {
+        this.repo = repo;
+        this.appointments = appointments;
+        this.appointmentManager = appointmentManager;
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    public PaymentResponse create(PaymentRequest request, Authentication auth) {
+        if (request.amount() == null || request.amount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Payment amount must be greater than zero");
+        }
+        Appointment appointment = appointments.findByIdForUpdate(request.appointmentId())
+                .orElseThrow(() -> new NotFoundException("Appointment not found: " + request.appointmentId()));
+        BigDecimal servicesTotal = appointmentManager.servicesTotal(appointment.getId());
+        BigDecimal paidTotal = appointmentManager.paidTotal(appointment.getId());
+        BigDecimal remaining = servicesTotal.subtract(paidTotal);
+        if (request.amount().compareTo(remaining) > 0) {
+            throw new ConflictException("Payment exceeds remaining balance of " + remaining);
+        }
+        Payment payment = new Payment();
+        payment.setAppointment(appointment);
+        payment.setAmount(request.amount());
+        payment.setPaymentMethod(request.paymentMethod());
+        payment.setPaidAt(request.paidAt());
+        return map(repo.save(payment));
+    }
+
+    @Transactional(readOnly = true)
+    public List<PaymentResponse> forAppointment(Long appointmentId, Authentication auth) {
+        appointmentManager.find(appointmentId, auth);
+        return repo.findByAppointmentIdOrderByPaidAt(appointmentId).stream().map(this::map).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PaymentResponse find(Long id, Authentication auth) {
+        Payment payment = repo.findById(id).orElseThrow(() -> new NotFoundException("Payment not found: " + id));
+        appointmentManager.find(payment.getAppointment().getId(), auth);
+        return map(payment);
+    }
+
+    private PaymentResponse map(Payment payment) {
+        return new PaymentResponse(payment.getId(), payment.getAppointment().getId(), payment.getAmount(),
+                payment.getPaymentMethod(), payment.getPaidAt(), payment.getCreatedAt());
+    }
 }
