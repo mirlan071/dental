@@ -28,15 +28,21 @@ public class PaymentService {
     @PreAuthorize("hasRole('ADMIN')")
     public PaymentResponse create(PaymentRequest request, Authentication auth) {
         if (request.amount() == null || request.amount().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Payment amount must be greater than zero");
+            throw new IllegalArgumentException("Сумма оплаты должна быть больше нуля.");
+        }
+        if (request.paidAt() == null || request.paidAt().toInstant().isAfter(java.time.Instant.now())) {
+            throw new IllegalArgumentException("Дата оплаты не может быть в будущем.");
         }
         Appointment appointment = appointments.findByIdForUpdate(request.appointmentId())
-                .orElseThrow(() -> new NotFoundException("Appointment not found: " + request.appointmentId()));
+                .orElseThrow(() -> new NotFoundException("Приём не найден: " + request.appointmentId()));
+        if (appointment.getStatus() != AppointmentStatus.COMPLETED) {
+            throw new ConflictException("Оплату можно добавить только к завершённому приёму.");
+        }
         BigDecimal servicesTotal = appointmentManager.servicesTotal(appointment.getId());
         BigDecimal paidTotal = appointmentManager.paidTotal(appointment.getId());
         BigDecimal remaining = servicesTotal.subtract(paidTotal);
         if (request.amount().compareTo(remaining) > 0) {
-            throw new ConflictException("Payment exceeds remaining balance of " + remaining);
+            throw new ConflictException("Оплата превышает остаток " + remaining + " сом.");
         }
         Payment payment = new Payment();
         payment.setAppointment(appointment);
@@ -54,7 +60,7 @@ public class PaymentService {
 
     @Transactional(readOnly = true)
     public PaymentResponse find(Long id, Authentication auth) {
-        Payment payment = repo.findById(id).orElseThrow(() -> new NotFoundException("Payment not found: " + id));
+        Payment payment = repo.findById(id).orElseThrow(() -> new NotFoundException("Платёж не найден: " + id));
         appointmentManager.find(payment.getAppointment().getId(), auth);
         return map(payment);
     }

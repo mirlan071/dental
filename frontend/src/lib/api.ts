@@ -29,6 +29,10 @@ async function csrfToken() {
   return csrf;
 }
 
+export function clearCsrfToken() {
+  csrf = null;
+}
+
 async function toError(response: Response) {
   let body: ApiErrorBody | null = null;
   try {
@@ -36,8 +40,10 @@ async function toError(response: Response) {
   } catch {
     /* empty Spring Security response */
   }
-  if (response.status === 401)
+  if (response.status === 401) {
+    clearCsrfToken();
     window.dispatchEvent(new Event("auth:unauthorized"));
+  }
   return new ApiError(
     response.status,
     body,
@@ -55,7 +61,7 @@ export async function api<T>(
   const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers(options.headers);
   if (options.body) headers.set("Content-Type", "application/json");
-  if (mutationMethods.has(method) && path !== "/api/auth/login") {
+  if (mutationMethods.has(method)) {
     const token = await csrfToken();
     headers.set(token.headerName, token.token);
   }

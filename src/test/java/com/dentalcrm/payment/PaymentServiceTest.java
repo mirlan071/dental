@@ -27,6 +27,7 @@ class PaymentServiceTest {
         service = new PaymentService(payments, appointments, appointmentManager);
         appointment = new Appointment();
         appointment.setId(7L);
+        appointment.setStatus(AppointmentStatus.COMPLETED);
         when(appointments.findByIdForUpdate(7L)).thenReturn(Optional.of(appointment));
         when(appointmentManager.servicesTotal(7L)).thenReturn(new BigDecimal("4000.00"));
         when(payments.save(any())).thenAnswer(invocation -> {
@@ -63,7 +64,23 @@ class PaymentServiceTest {
         when(appointmentManager.paidTotal(7L)).thenReturn(new BigDecimal("3000.00"));
         ConflictException error = assertThrows(ConflictException.class,
                 () -> service.create(request("1500.00", PaymentMethod.CASH), auth()));
-        assertTrue(error.getMessage().contains("remaining balance of 1000.00"));
+        assertTrue(error.getMessage().contains("остаток 1000.00"));
+        verify(payments, never()).save(any());
+    }
+
+    @Test
+    void rejectsPaymentBeforeAppointmentIsCompleted() {
+        appointment.setStatus(AppointmentStatus.SCHEDULED);
+        assertThrows(ConflictException.class,
+                () -> service.create(request("1000.00", PaymentMethod.CASH), auth()));
+        verify(payments, never()).save(any());
+    }
+
+    @Test
+    void rejectsFuturePaymentDate() {
+        var future = new PaymentDtos.PaymentRequest(7L, new BigDecimal("1000.00"), PaymentMethod.CASH,
+                OffsetDateTime.now().plusDays(1));
+        assertThrows(IllegalArgumentException.class, () -> service.create(future, auth()));
         verify(payments, never()).save(any());
     }
 

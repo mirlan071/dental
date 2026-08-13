@@ -29,9 +29,9 @@ public class ProductionDemoDataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        User admin = users.findFirstByRoleOrderByIdAsc(Role.ADMIN)
+        User admin = users.findFirstByRoleAndActiveTrueOrderByIdAsc(Role.ADMIN)
                 .orElseThrow(() -> new IllegalStateException(
-                        "Production demo data requires an existing ADMIN account"));
+                        "Production demo data requires an existing active ADMIN account"));
 
         DemoDataSeedService.SeedSummary summary = demoDataSeedService.seed(admin);
         if (summary.skipped()) {

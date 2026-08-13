@@ -31,7 +31,7 @@ class DashboardServiceTest {
         doctors=mock(DoctorRepository.class); service=new DashboardService(patients,appointments,items,payments,doctors);
         from=OffsetDateTime.parse("2026-08-01T00:00:00+06:00"); to=from.plusMonths(1);
         when(appointments.findByStatusOrderByStartTimeDesc(AppointmentStatus.COMPLETED)).thenReturn(List.of());
-        when(doctors.findByUserActiveTrueOrderByUserFullName()).thenReturn(List.of());
+        when(doctors.findAllByOrderByUserFullName()).thenReturn(List.of());
     }
 
     @Test void fullyPaidAppointmentIsNotDebtAndFinalPaymentRemovesPatient() {
@@ -79,16 +79,53 @@ class DashboardServiceTest {
     @Test void summaryHasCurrentDebtPeriodPerformanceDoctorAttributionAndPaymentMethods() {
         Patient p=patient(1,"Бекзат","0700");Doctor d1=doctor(1,"Аида"),d2=doctor(2,"Азамат");
         Appointment a=appointment(1,p,d1,AppointmentStatus.COMPLETED);treatment(a,"10000");paid(a,"4000",PaymentMethod.CASH,"1000",PaymentMethod.CARD,"500",PaymentMethod.QR);
-        when(appointments.findByStartTimeBetweenOrderByStartTime(from,to)).thenReturn(List.of(a));
+        List<Payment> periodPayments=payments.findByAppointmentIdOrderByPaidAt(a.getId());
+        when(appointments.findByStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(from,to)).thenReturn(List.of(a));
+        when(payments.findByPaidAtGreaterThanEqualAndPaidAtLessThan(from,to)).thenReturn(periodPayments);
         when(appointments.findByStatusOrderByStartTimeDesc(AppointmentStatus.COMPLETED)).thenReturn(List.of(a));
-        when(doctors.findByUserActiveTrueOrderByUserFullName()).thenReturn(List.of(d1,d2));
-        when(appointments.findByDoctorIdAndStartTimeBetweenOrderByStartTime(1L,from,to)).thenReturn(List.of(a));
-        when(appointments.findByDoctorIdAndStartTimeBetweenOrderByStartTime(2L,from,to)).thenReturn(List.of());
+        when(doctors.findAllByOrderByUserFullName()).thenReturn(List.of(d1,d2));
+        when(appointments.findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(1L,from,to)).thenReturn(List.of(a));
+        when(appointments.findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(2L,from,to)).thenReturn(List.of());
+        when(payments.findByAppointmentDoctorIdAndPaidAtGreaterThanEqualAndPaidAtLessThan(1L,from,to)).thenReturn(periodPayments);
         var result=service.summary(from,to);
         assertEquals(new BigDecimal("10000"),result.servicesPerformed()); assertEquals(new BigDecimal("5500"),result.paymentsReceived());
         assertEquals(new BigDecimal("4500"),result.totalDebt()); assertEquals(1,result.debtorCount());
         assertEquals(new BigDecimal("4000"),result.cashRevenue());assertEquals(new BigDecimal("1000"),result.cardRevenue());assertEquals(new BigDecimal("500"),result.qrRevenue());
-        assertEquals(new BigDecimal("4500"),result.doctors().getFirst().outstandingAmount());assertEquals(BigDecimal.ZERO,result.doctors().getLast().outstandingAmount());
+        assertEquals(new BigDecimal("4500"),result.doctors().getFirst().outstandingAmount());assertEquals(1,result.doctors().size());
+    }
+
+    @Test void dashboardUsesPaymentDateAndKeepsInactiveDoctorHistory() {
+        Doctor inactive=doctor(1,"Аида");inactive.getUser().setActive(false);
+        Appointment a=appointment(1,patient(1,"Айжан","0555"),inactive,AppointmentStatus.COMPLETED);
+        treatment(a,"1000");paid(a,"400",PaymentMethod.CASH);
+        List<Payment> periodPayments=payments.findByAppointmentIdOrderByPaidAt(a.getId());
+        when(appointments.findByStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(from,to)).thenReturn(List.of());
+        when(payments.findByPaidAtGreaterThanEqualAndPaidAtLessThan(from,to)).thenReturn(periodPayments);
+        when(doctors.findAllByOrderByUserFullName()).thenReturn(List.of(inactive));
+        when(appointments.findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(1L,from,to))
+                .thenReturn(List.of());
+        when(payments.findByAppointmentDoctorIdAndPaidAtGreaterThanEqualAndPaidAtLessThan(1L,from,to)).thenReturn(periodPayments);
+
+        var result=service.summary(from,to);
+        assertEquals(new BigDecimal("400"),result.paymentsReceived());
+        assertEquals(1,result.doctors().size());
+        assertEquals("Аида",result.doctors().getFirst().doctorFullName());
+    }
+
+    @Test void doctorAverageCheckUsesCompletedTreatmentValueNotUnrelatedPeriodPayments() {
+        Doctor doctor=doctor(1,"Аида");
+        Appointment a=appointment(1,patient(1,"Айжан","0555"),doctor,AppointmentStatus.COMPLETED);
+        treatment(a,"1200");paid(a,"400",PaymentMethod.CASH);
+        List<Payment> periodPayments=payments.findByAppointmentIdOrderByPaidAt(a.getId());
+        when(doctors.findByUserUsername("doctor")).thenReturn(Optional.of(doctor));
+        when(appointments.findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(1L,from,to))
+                .thenReturn(List.of(a));
+        when(payments.findByAppointmentDoctorIdAndPaidAtGreaterThanEqualAndPaidAtLessThan(1L,from,to))
+                .thenReturn(periodPayments);
+
+        var result=service.doctorSummary("doctor",from,to);
+        assertEquals(new BigDecimal("400"),result.revenue());
+        assertEquals(new BigDecimal("1200.00"),result.averageCheck());
     }
 
     @Test void debtorSearchMatchesNameAndPhone() {

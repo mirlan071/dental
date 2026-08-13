@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { ResponsivePicker } from "../components/responsive-picker";
-import type { Doctor } from "../types/api";
+import type { ActiveDoctor } from "../types/api";
 import { cn } from "../lib/utils";
 
 export function ClinicDoctorPicker({
@@ -8,7 +8,7 @@ export function ClinicDoctorPicker({
   value,
   onChange,
 }: {
-  doctors: Doctor[];
+  doctors: ActiveDoctor[];
   value: number | null;
   onChange: (id: number) => void;
 }) {

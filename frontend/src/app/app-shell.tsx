@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/auth-context";
 import { Button } from "../components/ui/button";
+import { errorMessage } from "../lib/api";
+import { useMediaQuery } from "../lib/use-media-query";
 import { cn } from "../lib/utils";
 const adminNav = [
   { to: "/dashboard", label: "Главная", icon: LayoutDashboard },
@@ -33,10 +35,15 @@ const doctorNav = [
 export function AppShell() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+  const [logoutPending, setLogoutPending] = useState(false);
+  const desktop = useMediaQuery("(min-width: 1024px)");
   const nav = user?.role === "ADMIN" ? adminNav : doctorNav;
   return (
     <div className="min-h-screen bg-slate-50">
       <aside
+        aria-hidden={!desktop && !open}
+        inert={!desktop && !open}
         className={cn(
           "fixed inset-y-0 left-0 z-40 w-64 border-r border-slate-200 bg-white transition-transform lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
@@ -89,11 +96,27 @@ export function AppShell() {
           <Button
             variant="ghost"
             className="w-full justify-start"
-            onClick={() => void logout()}
+            disabled={logoutPending}
+            onClick={async () => {
+              setLogoutPending(true);
+              setLogoutError("");
+              try {
+                await logout();
+              } catch (error) {
+                setLogoutError(errorMessage(error));
+              } finally {
+                setLogoutPending(false);
+              }
+            }}
           >
             <LogOut size={17} />
             Выйти
           </Button>
+          {logoutError && (
+            <p role="alert" className="mt-2 px-3 text-xs text-red-700">
+              {logoutError}
+            </p>
+          )}
         </div>
       </aside>
       {open && (

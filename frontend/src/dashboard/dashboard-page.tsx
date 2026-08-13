@@ -131,7 +131,7 @@ function DashboardContent({
       <Card>
         <Title
           title="Оплаты по способам"
-          subtitle="Платежи по завершённым приёмам выбранного периода"
+          subtitle="По датам поступления платежей за выбранный период"
         />
         <div className="grid divide-y divide-slate-200 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {[
@@ -152,7 +152,7 @@ function DashboardContent({
       <Card>
         <Title
           title="Эффективность врачей"
-          subtitle="По завершённым приёмам выбранного периода"
+          subtitle="Услуги — по датам приёмов, оплаты — по датам платежей"
         />
         <Table
           headers={[
@@ -204,6 +204,14 @@ function DashboardContent({
               <tr
                 key={d.patientId}
                 onClick={() => navigate(`/patients/${d.patientId}`)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    navigate(`/patients/${d.patientId}`);
+                  }
+                }}
+                tabIndex={0}
+                aria-label={`Открыть карточку пациента ${d.patientFullName}`}
                 className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
               >
                 <Cell strong>{d.patientFullName}</Cell>

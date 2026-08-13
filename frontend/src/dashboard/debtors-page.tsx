@@ -62,6 +62,14 @@ export function DebtorsPage() {
                 <tr
                   key={d.patientId}
                   onClick={() => navigate(`/patients/${d.patientId}`)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      navigate(`/patients/${d.patientId}`);
+                    }
+                  }}
+                  tabIndex={0}
+                  aria-label={`Открыть карточку пациента ${d.patientFullName}`}
                   className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
                 >
                   <td className="px-5 py-4 font-medium">{d.patientFullName}</td>

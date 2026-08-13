@@ -358,7 +358,8 @@ public class DemoDataSeedService {
         payment.setAppointment(appointment);
         payment.setAmount(amount);
         payment.setPaymentMethod(method);
-        payment.setPaidAt(paidAt);
+        OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
+        payment.setPaidAt(paidAt.isAfter(now) ? now : paidAt);
         payments.save(payment);
     }
 

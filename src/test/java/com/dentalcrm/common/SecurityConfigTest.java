@@ -1,6 +1,7 @@
 package com.dentalcrm.common;
 
 import com.dentalcrm.user.*;
+import com.dentalcrm.auth.AuthenticatedUserDetails;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.*;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -24,6 +25,7 @@ class SecurityConfigTest {
         when(repo.findByUsernameIgnoreCase("inactive")).thenReturn(Optional.of(user));
         var details = config.userDetailsService(repo).loadUserByUsername("inactive");
         assertFalse(details.isEnabled());
+        assertInstanceOf(AuthenticatedUserDetails.class, details);
     }
 
     @Test

@@ -35,12 +35,12 @@ public class DashboardService {
     @Transactional(readOnly = true)
     public DashboardSummary summary(OffsetDateTime from, OffsetDateTime to) {
         validateRange(from, to);
-        var period = appointments.findByStartTimeBetweenOrderByStartTime(from, to);
+        var period = appointments.findByStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(from, to);
         var completed = period.stream().filter(a -> a.getStatus() == AppointmentStatus.COMPLETED).toList();
-        List<Payment> completedPayments = completed.stream().flatMap(a -> paymentList(a).stream()).toList();
-        BigDecimal cash = sum(completedPayments, PaymentMethod.CASH);
-        BigDecimal card = sum(completedPayments, PaymentMethod.CARD);
-        BigDecimal qr = sum(completedPayments, PaymentMethod.QR);
+        List<Payment> periodPayments = payments.findByPaidAtGreaterThanEqualAndPaidAtLessThan(from, to);
+        BigDecimal cash = sum(periodPayments, PaymentMethod.CASH);
+        BigDecimal card = sum(periodPayments, PaymentMethod.CARD);
+        BigDecimal qr = sum(periodPayments, PaymentMethod.QR);
         BigDecimal performed = completed.stream().map(this::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal received = cash.add(card).add(qr);
         BigDecimal periodOutstanding = completed.stream().map(this::remaining).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -60,11 +60,11 @@ public class DashboardService {
     public DoctorDashboardSummary doctorSummary(String username, OffsetDateTime from, OffsetDateTime to) {
         validateRange(from, to);
         var doctor = doctors.findByUserUsername(username)
-                .orElseThrow(() -> new NotFoundException("Doctor profile not found"));
+                .orElseThrow(() -> new NotFoundException("Профиль врача не найден."));
         List<Appointment> periodAppointments = appointments
-                .findByDoctorIdAndStartTimeBetweenOrderByStartTime(doctor.getId(), from, to);
+                .findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(doctor.getId(), from, to);
         List<Payment> periodPayments = payments
-                .findByAppointmentDoctorIdAndPaidAtBetween(doctor.getId(), from, to);
+                .findByAppointmentDoctorIdAndPaidAtGreaterThanEqualAndPaidAtLessThan(doctor.getId(), from, to);
         long patientCount = periodAppointments.stream()
                 .filter(a -> a.getStatus() != AppointmentStatus.CANCELLED && a.getStatus() != AppointmentStatus.NO_SHOW)
                 .map(a -> a.getPatient().getId()).distinct().count();
@@ -73,8 +73,11 @@ public class DashboardService {
         BigDecimal card = sum(periodPayments, PaymentMethod.CARD);
         BigDecimal qr = sum(periodPayments, PaymentMethod.QR);
         BigDecimal revenue = cash.add(card).add(qr);
+        BigDecimal performed = periodAppointments.stream()
+                .filter(a -> a.getStatus() == AppointmentStatus.COMPLETED)
+                .map(this::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal averageCheck = completedCount == 0 ? BigDecimal.ZERO.setScale(2)
-                : revenue.divide(BigDecimal.valueOf(completedCount), 2, RoundingMode.HALF_UP);
+                : performed.divide(BigDecimal.valueOf(completedCount), 2, RoundingMode.HALF_UP);
         return new DoctorDashboardSummary(from, to, patientCount, completedCount, revenue, averageCheck,
                 new DoctorPaymentBreakdown(cash, card, qr));
     }
@@ -92,7 +95,7 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public PatientDebtDetails patientDebt(Long patientId) {
-        Patient patient = patients.findById(patientId).orElseThrow(() -> new NotFoundException("Patient not found: " + patientId));
+        Patient patient = patients.findById(patientId).orElseThrow(() -> new NotFoundException("Пациент не найден: " + patientId));
         List<Appointment> debtAppointments = currentDebtAppointments().stream()
                 .filter(a -> a.getPatient().getId().equals(patientId)).toList();
         List<DebtAppointment> details = debtAppointments.stream().map(this::debtAppointment).toList();
@@ -103,17 +106,20 @@ public class DashboardService {
     }
 
     private List<DoctorPerformance> doctorPerformance(OffsetDateTime from, OffsetDateTime to) {
-        return doctors.findByUserActiveTrueOrderByUserFullName().stream().map(doctor -> {
-            List<Appointment> period = appointments.findByDoctorIdAndStartTimeBetweenOrderByStartTime(doctor.getId(), from, to);
+        return doctors.findAllByOrderByUserFullName().stream().map(doctor -> {
+            List<Appointment> period = appointments
+                    .findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(doctor.getId(), from, to);
             List<Appointment> completed = period.stream().filter(a -> a.getStatus() == AppointmentStatus.COMPLETED).toList();
             long patientCount = completed.stream().map(a -> a.getPatient().getId()).distinct().count();
             BigDecimal performed = completed.stream().map(this::appointmentTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal received = completed.stream().flatMap(a -> paymentList(a).stream()).map(Payment::getAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal received = payments
+                    .findByAppointmentDoctorIdAndPaidAtGreaterThanEqualAndPaidAtLessThan(doctor.getId(), from, to)
+                    .stream().map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal outstanding = completed.stream().map(this::remaining).reduce(BigDecimal.ZERO, BigDecimal::add);
             return new DoctorPerformance(doctor.getId(), doctor.getUser().getFullName(), patientCount,
                     completed.size(), performed, received, outstanding);
-        }).sorted(Comparator.comparing(DoctorPerformance::servicesPerformed).reversed()).toList();
+        }).filter(result -> result.completedAppointments() > 0 || result.paymentsReceived().signum() > 0)
+                .sorted(Comparator.comparing(DoctorPerformance::servicesPerformed).reversed()).toList();
     }
 
     private List<Appointment> currentDebtAppointments() {
@@ -151,5 +157,5 @@ public class DashboardService {
     private BigDecimal paidTotal(Appointment appointment) { return paymentList(appointment).stream().map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add); }
     private BigDecimal remaining(Appointment appointment) { return appointmentTotal(appointment).subtract(paidTotal(appointment)).max(BigDecimal.ZERO); }
     private BigDecimal sum(List<Payment> source, PaymentMethod method) { return source.stream().filter(p -> p.getPaymentMethod() == method).map(Payment::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add); }
-    private void validateRange(OffsetDateTime from, OffsetDateTime to) { if (!to.isAfter(from)) throw new IllegalArgumentException("to must be after from"); }
+    private void validateRange(OffsetDateTime from, OffsetDateTime to) { if (!to.isAfter(from)) throw new IllegalArgumentException("Конец периода должен быть позже начала."); }
 }

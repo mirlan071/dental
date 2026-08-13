@@ -36,7 +36,7 @@ public class ProductionAdminBootstrap implements CommandLineRunner {
     @Override
     @Transactional
     public void run(String... args) {
-        if (users.existsByRole(Role.ADMIN)) {
+        if (users.existsByRoleAndActiveTrue(Role.ADMIN)) {
             log.info("Production ADMIN already exists; bootstrap skipped");
             return;
         }
@@ -50,8 +50,18 @@ public class ProductionAdminBootstrap implements CommandLineRunner {
         if (password.length() < 10) {
             throw new IllegalStateException("APP_BOOTSTRAP_ADMIN_PASSWORD must contain at least 10 characters");
         }
-        if (users.existsByUsernameIgnoreCase(username)) {
-            throw new IllegalStateException("Bootstrap ADMIN username is already used by a non-admin account");
+        var existing = users.findByUsernameIgnoreCase(username);
+        if (existing.isPresent()) {
+            User user = existing.get();
+            if (user.getRole() != Role.ADMIN) {
+                throw new IllegalStateException("Bootstrap ADMIN username is already used by a non-admin account");
+            }
+            user.setPasswordHash(encoder.encode(password));
+            user.setFullName(fullName);
+            user.setActive(true);
+            user.setAuthVersion(user.getAuthVersion() + 1);
+            log.info("Inactive production ADMIN account reactivated for username {}", username);
+            return;
         }
         User admin = new User();
         admin.setUsername(username);

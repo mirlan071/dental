@@ -55,17 +55,22 @@ public class AppointmentManager {
     }
 
     public AppointmentResponse create(AppointmentRequest request, Authentication auth) {
+        List<ServiceItemRequest> requestedServices = requestedServices(request);
+        requireServices(requestedServices);
+        if (request.startTime().toInstant().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("Нельзя создать запись в прошлом.");
+        }
         validateTime(request.startTime(), request.endTime());
         if (request.status() != null && request.status() != AppointmentStatus.SCHEDULED) {
-            throw new IllegalArgumentException("New appointments must have SCHEDULED status");
+            throw new IllegalArgumentException("Новая запись должна иметь статус SCHEDULED.");
         }
         ensureDoctorAccess(request.doctorId(), auth);
         checkConflict(request.doctorId(), request.startTime(), request.endTime(), null);
 
         Appointment appointment = new Appointment();
         appointment.setPatient(patients.get(request.patientId()));
-        Doctor selectedDoctor = doctors.get(request.doctorId());
-        if (!selectedDoctor.getUser().isActive()) throw new IllegalArgumentException("Inactive doctor cannot be assigned to a new appointment");
+        Doctor selectedDoctor = doctors.getForAssignment(request.doctorId());
+        if (!selectedDoctor.getUser().isActive()) throw new IllegalArgumentException("Нельзя назначить неактивного врача.");
         appointment.setDoctor(selectedDoctor);
         appointment.setStartTime(request.startTime());
         appointment.setEndTime(request.endTime());
@@ -73,40 +78,52 @@ public class AppointmentManager {
         appointment.setNotes(request.notes());
         appointment.setCreatedBy(users.findByUsernameIgnoreCase(auth.getName()).orElseThrow());
         repo.save(appointment);
-        addServices(appointment, requestedServices(request));
+        addServices(appointment, requestedServices);
         return map(appointment);
     }
 
     public AppointmentResponse update(Long id, AppointmentRequest request, Authentication auth) {
-        Appointment appointment = get(id);
+        Appointment appointment = getForUpdate(id);
         ensureDoctorAccess(appointment.getDoctor().getId(), auth);
+        if (appointment.getStatus() != AppointmentStatus.SCHEDULED
+                && appointment.getStatus() != AppointmentStatus.IN_PROGRESS) {
+            throw new ConflictException("Завершённую или отменённую запись нельзя редактировать.");
+        }
+        List<ServiceItemRequest> requestedServices = requestedServices(request);
+        requireServices(requestedServices);
+        if (request.startTime().toInstant().isBefore(Instant.now())
+                && !request.startTime().toInstant().equals(appointment.getStartTime().toInstant())) {
+            throw new IllegalArgumentException("Нельзя перенести запись в прошлое.");
+        }
         ensureDoctorAccess(request.doctorId(), auth);
         validateTime(request.startTime(), request.endTime());
         checkConflict(request.doctorId(), request.startTime(), request.endTime(), id);
 
         appointment.setPatient(patients.get(request.patientId()));
-        appointment.setDoctor(doctors.get(request.doctorId()));
+        Doctor selectedDoctor = doctors.getForAssignment(request.doctorId());
+        if (!selectedDoctor.getUser().isActive()) {
+            throw new IllegalArgumentException("Нельзя назначить неактивного врача.");
+        }
+        appointment.setDoctor(selectedDoctor);
         appointment.setStartTime(request.startTime());
         appointment.setEndTime(request.endTime());
         appointment.setNotes(request.notes());
-        items.deleteAll(items.findByAppointmentId(id));
-        items.flush();
-        addServices(appointment, requestedServices(request));
+        replaceServices(appointment, requestedServices);
         if (paidTotal(id).compareTo(servicesTotal(id)) > 0) {
-            throw new ConflictException("Appointment services total cannot be lower than the amount already paid");
+            throw new ConflictException("Стоимость услуг не может быть меньше уже оплаченной суммы.");
         }
         return map(appointment);
     }
 
     public AppointmentResponse status(Long id, AppointmentStatus target, Authentication auth) {
-        Appointment appointment = get(id);
+        Appointment appointment = getForUpdate(id);
         ensureDoctorAccess(appointment.getDoctor().getId(), auth);
         AppointmentStatus current = appointment.getStatus();
         if (!ALLOWED_TRANSITIONS.get(current).contains(target)) {
-            throw new ConflictException("Status transition from " + current + " to " + target + " is not allowed");
+            throw new ConflictException("Такой переход статуса приёма недоступен.");
         }
         if (target == AppointmentStatus.COMPLETED && !items.existsByAppointmentId(id)) {
-            throw new ConflictException("Appointment cannot be completed without at least one service");
+            throw new ConflictException("Нельзя завершить приём без услуг.");
         }
         appointment.setStatus(target);
         return map(appointment);
@@ -114,11 +131,12 @@ public class AppointmentManager {
 
     @Transactional(readOnly = true)
     public List<AppointmentResponse> list(OffsetDateTime from, OffsetDateTime to, Authentication auth) {
-        if (!to.isAfter(from)) throw new IllegalArgumentException("to must be after from");
-        var doctor = doctorRepo.findByUserUsername(auth.getName());
-        var data = doctor.isPresent()
-                ? repo.findByDoctorIdAndStartTimeBetweenOrderByStartTime(doctor.get().getId(), from, to)
-                : repo.findByStartTimeBetweenOrderByStartTime(from, to);
+        if (!to.isAfter(from)) throw new IllegalArgumentException("Конец периода должен быть позже начала.");
+        boolean admin = auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
+        var data = admin
+                ? repo.findByStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(from, to)
+                : repo.findByDoctorIdAndStartTimeGreaterThanEqualAndStartTimeLessThanOrderByStartTime(
+                        doctorProfile(auth).getId(), from, to);
         return data.stream().map(this::map).toList();
     }
 
@@ -142,11 +160,12 @@ public class AppointmentManager {
     }
 
     private void addServices(Appointment appointment, List<ServiceItemRequest> requested) {
+        Map<Long, ClinicService> lockedServices = lockServices(requested);
         Set<Long> seen = new HashSet<>();
         for (ServiceItemRequest request : requested) {
-            if (!seen.add(request.serviceId())) throw new ConflictException("A service may appear only once per appointment");
-            ClinicService service = services.get(request.serviceId());
-            if (!service.isActive()) throw new IllegalArgumentException("Inactive service cannot be added: " + request.serviceId());
+            if (!seen.add(request.serviceId())) throw new ConflictException("Одну услугу нельзя добавить в запись дважды.");
+            ClinicService service = lockedServices.get(request.serviceId());
+            if (!service.isActive()) throw new IllegalArgumentException("Нельзя добавить неактивную услугу: " + request.serviceId());
             AppointmentServiceItem item = new AppointmentServiceItem();
             item.setAppointment(appointment);
             item.setService(service);
@@ -157,32 +176,86 @@ public class AppointmentManager {
         items.flush();
     }
 
+    private void replaceServices(Appointment appointment, List<ServiceItemRequest> requested) {
+        List<AppointmentServiceItem> current = items.findByAppointmentId(appointment.getId());
+        Map<Long, AppointmentServiceItem> existing = new HashMap<>();
+        current.forEach(item -> existing.put(item.getService().getId(), item));
+        Set<Long> requestedIds = new HashSet<>();
+        List<ServiceItemRequest> added = requested.stream()
+                .filter(request -> !existing.containsKey(request.serviceId()))
+                .toList();
+        Map<Long, ClinicService> lockedServices = lockServices(added);
+        for (ServiceItemRequest request : requested) {
+            if (!requestedIds.add(request.serviceId())) {
+                throw new ConflictException("Одну услугу нельзя добавить в запись дважды.");
+            }
+            AppointmentServiceItem item = existing.get(request.serviceId());
+            if (item != null) {
+                item.setQuantity(request.quantity() == null ? 1 : request.quantity());
+            } else {
+                ClinicService service = lockedServices.get(request.serviceId());
+                if (!service.isActive()) throw new IllegalArgumentException("Нельзя добавить неактивную услугу: " + request.serviceId());
+                AppointmentServiceItem newItem = new AppointmentServiceItem();
+                newItem.setAppointment(appointment);
+                newItem.setService(service);
+                newItem.setPrice(service.getPrice());
+                newItem.setQuantity(request.quantity() == null ? 1 : request.quantity());
+                items.save(newItem);
+            }
+        }
+        List<AppointmentServiceItem> removed = current.stream()
+                .filter(item -> !requestedIds.contains(item.getService().getId()))
+                .toList();
+        if (!removed.isEmpty()) items.deleteAll(removed);
+        items.flush();
+    }
+
+    private Map<Long, ClinicService> lockServices(List<ServiceItemRequest> requested) {
+        Map<Long, ClinicService> locked = new HashMap<>();
+        requested.stream().map(ServiceItemRequest::serviceId).distinct().sorted()
+                .forEach(id -> locked.put(id, services.getForUpdate(id)));
+        return locked;
+    }
+
     private List<ServiceItemRequest> requestedServices(AppointmentRequest request) {
         if (request.services() != null) return request.services();
         if (request.serviceIds() == null) return List.of();
         return request.serviceIds().stream().map(id -> new ServiceItemRequest(id, 1)).toList();
     }
 
+    private void requireServices(List<ServiceItemRequest> requested) {
+        if (requested.isEmpty()) throw new IllegalArgumentException("Добавьте хотя бы одну услугу.");
+    }
+
     private void checkConflict(Long doctorId, OffsetDateTime start, OffsetDateTime end, Long excludedId) {
         if (repo.hasConflict(doctorId, start, end, excludedId)) {
-            throw new ConflictException("Doctor already has an overlapping appointment");
+            throw new ConflictException("У врача уже есть запись на это время.");
         }
     }
 
     private void validateTime(OffsetDateTime start, OffsetDateTime end) {
-        if (!end.isAfter(start)) throw new IllegalArgumentException("endTime must be after startTime");
+        if (!end.isAfter(start)) throw new IllegalArgumentException("Время окончания должно быть позже времени начала.");
         clinicSettings.validateAppointmentTime(start, end);
     }
 
     private void ensureDoctorAccess(Long doctorId, Authentication auth) {
         boolean admin = auth.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-        if (!admin && doctorRepo.findByUserUsername(auth.getName()).map(Doctor::getId).filter(doctorId::equals).isEmpty()) {
-            throw new AccessDeniedException("Doctors may only manage their own appointments");
+        if (!admin && !doctorProfile(auth).getId().equals(doctorId)) {
+            throw new AccessDeniedException("Врач может работать только со своими приёмами.");
         }
     }
 
+    private Doctor doctorProfile(Authentication auth) {
+        return doctorRepo.findByUserUsername(auth.getName())
+                .orElseThrow(() -> new AccessDeniedException("Профиль врача не настроен."));
+    }
+
     private Appointment get(Long id) {
-        return repo.findById(id).orElseThrow(() -> new NotFoundException("Appointment not found: " + id));
+        return repo.findById(id).orElseThrow(() -> new NotFoundException("Приём не найден: " + id));
+    }
+
+    private Appointment getForUpdate(Long id) {
+        return repo.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Приём не найден: " + id));
     }
 
     private AppointmentResponse map(Appointment appointment) {

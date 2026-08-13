@@ -8,3 +8,4 @@ target/
 !frontend/.env.example
 application-local.yml
 *.log
+.local-logs/

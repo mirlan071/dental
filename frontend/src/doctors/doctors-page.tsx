@@ -57,8 +57,16 @@ export function DoctorsPage() {
           ))}
         </div>
       )}
-      <DoctorDialog state={form} close={() => setForm(null)} />
-      <PasswordDialog doctor={reset} close={() => setReset(null)} />
+      <DoctorDialog
+        key={`${form?.mode ?? "closed"}-${form?.doctor?.id ?? 0}`}
+        state={form}
+        close={() => setForm(null)}
+      />
+      <PasswordDialog
+        key={reset?.id ?? "closed"}
+        doctor={reset}
+        close={() => setReset(null)}
+      />
     </>
   );
 }
@@ -124,7 +132,10 @@ function DoctorCard({
       )}
       <Dialog
         open={confirmDeactivate}
-        onOpenChange={setConfirmDeactivate}
+        onOpenChange={(open) => {
+          if (!open && mutation.isPending) return;
+          setConfirmDeactivate(open);
+        }}
         title="Деактивировать врача?"
       >
         <p className="text-sm text-slate-600">
@@ -138,6 +149,7 @@ function DoctorCard({
         <div className="mt-6 flex justify-end gap-2">
           <Button
             variant="secondary"
+            disabled={mutation.isPending}
             onClick={() => setConfirmDeactivate(false)}
           >
             Отмена
@@ -181,17 +193,20 @@ function DoctorDialog({
 }) {
   const client = useQueryClient();
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   if (!state) return null;
   return (
     <Dialog
       open
-      onOpenChange={(open) => !open && close()}
+      onOpenChange={(open) => !open && !pending && close()}
       title={state.mode === "create" ? "Новый врач" : "Редактировать врача"}
     >
       <DoctorForm
         key={`${state.mode}-${state.doctor?.id ?? 0}`}
         state={state}
         error={error}
+        pending={pending}
+        setPending={setPending}
         submit={async (input) => {
           setError(null);
           try {
@@ -221,11 +236,15 @@ function DoctorForm({
   submit,
   close,
   error,
+  pending,
+  setPending,
 }: {
   state: { mode: "create" | "edit"; doctor?: Doctor };
   submit: (input: DoctorCreateInput | DoctorUpdateInput) => Promise<void>;
   close: () => void;
   error: string | null;
+  pending: boolean;
+  setPending: (pending: boolean) => void;
 }) {
   const d = state.doctor;
   const [fullName, setFullName] = useState(d?.fullName ?? "");
@@ -233,7 +252,6 @@ function DoctorForm({
   const [password, setPassword] = useState("");
   const [specialization, setSpecialization] = useState(d?.specialization ?? "");
   const [phone, setPhone] = useState(d?.phone ?? "");
-  const [pending, setPending] = useState(false);
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setPending(true);
@@ -242,10 +260,13 @@ function DoctorForm({
       specialization: specialization || null,
       phone: phone || null,
     };
-    await submit(
-      state.mode === "create" ? { ...common, username, password } : common,
-    );
-    setPending(false);
+    try {
+      await submit(
+        state.mode === "create" ? { ...common, username, password } : common,
+      );
+    } finally {
+      setPending(false);
+    }
   }
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -278,7 +299,12 @@ function DoctorForm({
         <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
       )}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="secondary" onClick={close}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={pending}
+          onClick={close}
+        >
           Отмена
         </Button>
         <Button disabled={pending}>
@@ -338,7 +364,7 @@ function PasswordDialog({
   return (
     <Dialog
       open={Boolean(doctor)}
-      onOpenChange={(open) => !open && close()}
+      onOpenChange={(open) => !open && !mutation.isPending && close()}
       title="Сбросить пароль"
     >
       <form
@@ -360,7 +386,7 @@ function PasswordDialog({
         />
         {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
         <div className="mt-6 flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={close}>
+          <Button type="button" variant="secondary" disabled={mutation.isPending} onClick={close}>
             Отмена
           </Button>
           <Button disabled={mutation.isPending || password.length < 8}>

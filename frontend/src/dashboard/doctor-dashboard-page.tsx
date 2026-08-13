@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Banknote, CheckCircle2, CreditCard, QrCode, ReceiptText, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -27,7 +27,8 @@ function DoctorDashboardContent({summary,appointments}:{summary:DoctorDashboardS
   const navigate=useNavigate();
   const client=useQueryClient();
   const[nextError,setNextError]=useState<Error|null>(null);
-  const now=Date.now();
+  const[now,setNow]=useState(Date.now);
+  useEffect(()=>{const timer=window.setInterval(()=>setNow(Date.now()),30_000);return()=>window.clearInterval(timer)},[]);
   const next=useMemo(()=>appointments.filter(item=>item.status==="SCHEDULED"&&new Date(item.startTime).getTime()>now).sort((a,b)=>a.startTime.localeCompare(b.startTime))[0],[appointments,now]);
   const mutation=useMutation({mutationFn:({id,status}:{id:number;status:AppointmentStatus})=>api<Appointment>(`/api/appointments/${id}/status`,{method:"PATCH",body:JSON.stringify({status})}),onSuccess:async appointment=>{setNextError(null);await Promise.all([client.invalidateQueries({queryKey:["dashboard"]}),client.invalidateQueries({queryKey:["appointments"]}),client.invalidateQueries({queryKey:["appointment",String(appointment.id)]})])},onError:setNextError});
   const metrics=[{label:"Пациенты",value:String(summary.patients),icon:Users},{label:"Завершено",value:String(summary.completedAppointments),icon:CheckCircle2},{label:"Получено оплат",value:formatMoney(summary.revenue),icon:Banknote},{label:"Средний чек",value:formatMoney(summary.averageCheck),icon:ReceiptText}];

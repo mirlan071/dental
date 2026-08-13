@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -174,7 +174,9 @@ export function AppointmentDetailsPage() {
             <SectionTitle
               title="Платежи"
               action={
-                user?.role === "ADMIN" && item.remainingBalance > 0 ? (
+                user?.role === "ADMIN" &&
+                item.status === "COMPLETED" &&
+                item.remainingBalance > 0 ? (
                   <Button size="sm" onClick={() => setPaymentOpen(true)}>
                     Добавить оплату
                   </Button>
@@ -342,6 +344,12 @@ function PaymentDialog({
       ]);
     },
   });
+  useEffect(() => {
+    if (!open) return;
+    setAmount(String(appointment.remainingBalance));
+    setMethod("CASH");
+    mutation.reset();
+  }, [open, appointment.remainingBalance]);
   function submit(e: FormEvent) {
     e.preventDefault();
     const value = Number(amount);
@@ -354,7 +362,14 @@ function PaymentDialog({
     });
   }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Добавить оплату">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && mutation.isPending) return;
+        onOpenChange(next);
+      }}
+      title="Добавить оплату"
+    >
       <form onSubmit={submit}>
         <div className="mb-5 rounded-lg bg-brand-50 p-4">
           <p className="text-sm text-brand-800">Остаток к оплате</p>
@@ -398,6 +413,7 @@ function PaymentDialog({
           <Button
             type="button"
             variant="secondary"
+            disabled={mutation.isPending}
             onClick={() => onOpenChange(false)}
           >
             Отмена

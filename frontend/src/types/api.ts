@@ -143,6 +143,11 @@ export interface Doctor {
   phone: string | null;
   active: boolean;
 }
+export interface ActiveDoctor {
+  id: number;
+  fullName: string;
+  specialization: string | null;
+}
 export interface DoctorCreateInput {
   fullName: string;
   username: string;

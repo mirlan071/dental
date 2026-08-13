@@ -11,8 +11,8 @@ import { formatMoney } from "../lib/utils";
 import type {
   Appointment,
   AppointmentCreateInput,
+  ActiveDoctor,
   ClinicService,
-  Doctor,
   Patient,
   PatientInput,
 } from "../types/api";
@@ -50,9 +50,18 @@ export function QuickAppointmentDialog({
     [],
   );
   const [creatingPatient, setCreatingPatient] = useState(false);
+  const [patientCreationPending, setPatientCreationPending] = useState(false);
+  const [clock, setClock] = useState(Date.now);
   const clinicSettings = useClinicSettings();
   const workdayStart = clinicSettings.data?.workdayStart.slice(0, 5) ?? "";
   const workdayEnd = clinicSettings.data?.workdayEnd.slice(0, 5) ?? "";
+
+  useEffect(() => {
+    if (!open) return;
+    setClock(Date.now());
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -60,11 +69,17 @@ export function QuickAppointmentDialog({
       setDate(initial.date);
       setTime(initial.time ?? workdayStart);
     }
-  }, [open, initial, workdayStart]);
+  }, [
+    open,
+    initial.doctorId,
+    initial.date,
+    initial.time,
+    workdayStart,
+  ]);
 
   const doctors = useQuery({
     queryKey: ["doctors", "active"],
-    queryFn: () => api<Doctor[]>("/api/doctors?activeOnly=true"),
+    queryFn: () => api<ActiveDoctor[]>("/api/doctors/active"),
     enabled: open,
   });
   const services = useQuery({
@@ -109,6 +124,12 @@ export function QuickAppointmentDialog({
     (sum, item) => sum + item.service.price * item.quantity,
     0,
   );
+  const selectedStartMinutes = timeToMinutes(effectiveTime);
+  const withinWorkday =
+    Boolean(workdayStart && workdayEnd) &&
+    selectedStartMinutes >= timeToMinutes(workdayStart) &&
+    selectedStartMinutes + duration <= timeToMinutes(workdayEnd);
+  const inFuture = start.getTime() > clock;
   const suggestedTimes = useMemo(() => {
     if (!doctorId) return [];
     if (!workdayStart || !workdayEnd) return [];
@@ -136,12 +157,14 @@ export function QuickAppointmentDialog({
       .filter(
         (candidate) =>
           candidate + duration <= workdayEndMinutes &&
+          new Date(`${date}T${minutesToTime(candidate)}:00+06:00`).getTime() >
+            clock &&
           !blocking.some(
             (item) => candidate < item.end && candidate + duration > item.start,
           ),
       )
       .map(minutesToTime);
-  }, [dayAppointments.data, doctorId, duration, workdayEnd, workdayStart]);
+  }, [clock, date, dayAppointments.data, doctorId, duration, workdayEnd, workdayStart]);
 
   const createAppointment = useMutation({
     mutationFn: (input: AppointmentCreateInput) =>
@@ -160,14 +183,20 @@ export function QuickAppointmentDialog({
     },
   });
 
+  useEffect(() => {
+    if (open) createAppointment.reset();
+  }, [open]);
+
   function reset() {
     setPatientSearch("");
     setSelectedPatient(null);
     setSelectedServices([]);
     setCreatingPatient(false);
+    setPatientCreationPending(false);
   }
   function close(next: boolean) {
-    if (!next && !createAppointment.isPending) reset();
+    if (!next && (createAppointment.isPending || patientCreationPending)) return;
+    if (!next) reset();
     onOpenChange(next);
   }
   function selectService(service: ClinicService) {
@@ -192,7 +221,19 @@ export function QuickAppointmentDialog({
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!selectedPatient || !doctorId) return;
+    const now = Date.now();
+    if (start.getTime() <= now) {
+      setClock(now);
+      return;
+    }
+    if (
+      !selectedPatient ||
+      !doctorId ||
+      !selectedServices.length ||
+      !withinWorkday ||
+      !inFuture
+    )
+      return;
     createAppointment.mutate({
       patientId: selectedPatient.id,
       doctorId: Number(doctorId),
@@ -249,6 +290,7 @@ export function QuickAppointmentDialog({
                   setPatientSearch("");
                 }}
                 onCancel={() => setCreatingPatient(false)}
+                onPendingChange={setPatientCreationPending}
               />
             ) : (
               <div className="relative mt-2">
@@ -312,9 +354,7 @@ export function QuickAppointmentDialog({
               Врач
               <div className="mt-2">
                 <ClinicDoctorPicker
-                  doctors={(doctors.data ?? []).filter(
-                    (doctor) => doctor.active,
-                  )}
+                  doctors={doctors.data ?? []}
                   value={doctorId ? Number(doctorId) : null}
                   onChange={(id) => setDoctorId(String(id))}
                 />
@@ -459,7 +499,7 @@ export function QuickAppointmentDialog({
                     Услуги пока не добавлены
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Можно создать запись сейчас и указать лечение позже.
+                    Добавьте хотя бы одну услугу, чтобы создать запись.
                   </p>
                 </div>
               )}
@@ -479,6 +519,17 @@ export function QuickAppointmentDialog({
             {conflict
               ? "Это время уже занято у выбранного врача."
               : errorMessage(createAppointment.error)}
+          </div>
+        )}
+        {!withinWorkday && workdayStart && workdayEnd && (
+          <div className="md:col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+            Приём должен полностью помещаться в рабочее время: {workdayStart}–
+            {workdayEnd}. Выберите более раннее время или сократите набор услуг.
+          </div>
+        )}
+        {!inFuture && (
+          <div className="md:col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+            Нельзя создать запись в прошлом. Выберите более позднее время.
           </div>
         )}
         <div className="sticky -bottom-4 z-20 -mx-4 flex flex-col gap-3 border-t border-slate-200 bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 md:static md:mx-0 md:flex-row md:items-center md:justify-end md:bg-transparent md:p-0 md:pt-4 md:col-span-2">
@@ -503,6 +554,9 @@ export function QuickAppointmentDialog({
               type="button"
               variant="secondary"
               className="flex-1 md:flex-none"
+              disabled={
+                createAppointment.isPending || patientCreationPending
+              }
               onClick={() => close(false)}
             >
               Отмена
@@ -512,8 +566,12 @@ export function QuickAppointmentDialog({
               disabled={
                 !selectedPatient ||
                 !doctorId ||
+                !selectedServices.length ||
                 !workdayStart ||
                 !workdayEnd ||
+                !withinWorkday ||
+                !inFuture ||
+                patientCreationPending ||
                 createAppointment.isPending
               }
             >
@@ -542,10 +600,13 @@ function clinicMinutes(value: string) {
 function InlinePatientForm({
   onCreated,
   onCancel,
+  onPendingChange,
 }: {
   onCreated: (patient: Patient) => void;
   onCancel: () => void;
+  onPendingChange: (pending: boolean) => void;
 }) {
+  const client = useQueryClient();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const mutation = useMutation({
@@ -554,7 +615,12 @@ function InlinePatientForm({
         method: "POST",
         body: JSON.stringify(input),
       }),
-    onSuccess: onCreated,
+    onMutate: () => onPendingChange(true),
+    onSuccess: async (patient) => {
+      await client.invalidateQueries({ queryKey: ["patients"] });
+      onCreated(patient);
+    },
+    onSettled: () => onPendingChange(false),
   });
   return (
     <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -579,7 +645,13 @@ function InlinePatientForm({
         </p>
       )}
       <div className="mt-3 flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={mutation.isPending}
+          onClick={onCancel}
+        >
           Назад
         </Button>
         <Button

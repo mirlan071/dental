@@ -9,8 +9,8 @@ public final class ClinicSettingsDtos {
     }
 
     public record ClinicSettingsRequest(
-            @NotNull LocalTime workdayStart,
-            @NotNull LocalTime workdayEnd
+            @NotNull(message = "Укажите начало рабочего дня.") LocalTime workdayStart,
+            @NotNull(message = "Укажите окончание рабочего дня.") LocalTime workdayEnd
     ) {
     }
 

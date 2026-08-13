@@ -38,6 +38,7 @@ export function AppointmentsPage({ myDay = false }: { myDay?: boolean }) {
 
 function AdminDailyCalendar() {
   const [date, setDate] = useState(clinicToday);
+  const [clock, setClock] = useState(Date.now);
   const [doctorFilter, setDoctorFilter] = useState<number | null>(null);
   const [booking, setBooking] = useState<{
     open: boolean;
@@ -49,8 +50,8 @@ function AdminDailyCalendar() {
   const clinicSettings = useClinicSettings();
   const range = clinicDayRange(date);
   const doctors = useQuery({
-    queryKey: ["doctors", "active"],
-    queryFn: () => api<Doctor[]>("/api/doctors?activeOnly=true"),
+    queryKey: ["doctors"],
+    queryFn: () => api<Doctor[]>("/api/doctors"),
   });
   const appointments = useQuery({
     queryKey: ["appointments", date],
@@ -59,16 +60,38 @@ function AdminDailyCalendar() {
         `/api/appointments?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
       ),
   });
-  const activeDoctors = doctors.data ?? [];
   const dayAppointments = appointments.data ?? [];
+  const calendarDoctors = (doctors.data ?? []).filter(
+    (doctor) =>
+      doctor.active ||
+      dayAppointments.some((appointment) => appointment.doctorId === doctor.id),
+  );
+  const visibleDoctorFilter = calendarDoctors.some(
+    (doctor) => doctor.id === doctorFilter,
+  )
+    ? doctorFilter
+    : null;
   const workdayStart = clinicSettings.data?.workdayStart.slice(0, 5);
   const workdayEnd = clinicSettings.data?.workdayEnd.slice(0, 5);
+  const canBookSlot = (minutes: number) =>
+    new Date(`${date}T${minutesToTime(minutes)}:00+06:00`).getTime() > clock;
   function move(days: number) {
     setDate((current) => shiftClinicDate(current, days));
   }
   function openSlot(doctorId: number, minutes: number) {
+    const now = Date.now();
+    if (
+      new Date(`${date}T${minutesToTime(minutes)}:00+06:00`).getTime() <= now
+    ) {
+      setClock(now);
+      return;
+    }
     setBooking({ open: true, doctorId, time: minutesToTime(minutes) });
   }
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     if (!success) return;
     const timer = window.setTimeout(() => setSuccess(""), 3500);
@@ -106,7 +129,7 @@ function AdminDailyCalendar() {
         <ErrorState error={appointments.error} />
       ) : clinicSettings.error ? (
         <ErrorState error={clinicSettings.error} />
-      ) : !activeDoctors.length ? (
+      ) : !calendarDoctors.length ? (
         <EmptyState
           title="Нет активных врачей"
           text="Активируйте врача, чтобы показать расписание"
@@ -116,24 +139,26 @@ function AdminDailyCalendar() {
           <div className="hidden md:block">
             <AdminDailyCalendarDesktop
               date={date}
-              doctors={activeDoctors}
+              doctors={calendarDoctors}
               appointments={dayAppointments}
               workdayStart={workdayStart!}
               workdayEnd={workdayEnd!}
               openSlot={openSlot}
+              canBookSlot={canBookSlot}
               openAppointment={(id) => navigate(`/appointments/${id}`)}
             />
           </div>
           <div className="md:hidden">
             <AdminDailyAgendaMobile
               date={date}
-              doctors={activeDoctors}
+              doctors={calendarDoctors}
               appointments={dayAppointments}
               workdayStart={workdayStart!}
               workdayEnd={workdayEnd!}
-              selectedDoctor={doctorFilter}
+              selectedDoctor={visibleDoctorFilter}
               setSelectedDoctor={setDoctorFilter}
               openSlot={openSlot}
+              canBookSlot={canBookSlot}
               openAppointment={(id) => navigate(`/appointments/${id}`)}
             />
           </div>
@@ -217,6 +242,7 @@ function AdminDailyCalendarDesktop({
   workdayStart,
   workdayEnd,
   openSlot,
+  canBookSlot,
   openAppointment,
 }: {
   date: string;
@@ -225,16 +251,42 @@ function AdminDailyCalendarDesktop({
   workdayStart: string;
   workdayEnd: string;
   openSlot: (doctorId: number, minutes: number) => void;
+  canBookSlot: (minutes: number) => boolean;
   openAppointment: (id: number) => void;
 }) {
-  const startMinutes = timeToMinutes(workdayStart),
-    endMinutes = timeToMinutes(workdayEnd);
+  const configuredStartMinutes = timeToMinutes(workdayStart),
+    configuredEndMinutes = timeToMinutes(workdayEnd);
+  const appointmentStarts = appointments.map((item) =>
+    minutesInBishkek(item.startTime),
+  );
+  const appointmentEnds = appointments.map((item) =>
+    minutesInBishkek(item.endTime),
+  );
+  const startMinutes = Math.floor(
+    Math.min(configuredStartMinutes, ...appointmentStarts) /
+      CALENDAR_CONFIG.slotMinutes,
+  ) * CALENDAR_CONFIG.slotMinutes;
+  const endMinutes = Math.ceil(
+    Math.max(configuredEndMinutes, ...appointmentEnds) /
+      CALENDAR_CONFIG.slotMinutes,
+  ) * CALENDAR_CONFIG.slotMinutes;
   const totalHeight =
     ((endMinutes - startMinutes) / 60) * CALENDAR_CONFIG.hourHeight;
   const slots = Array.from(
-    { length: (endMinutes - startMinutes) / CALENDAR_CONFIG.slotMinutes },
-    (_, index) => startMinutes + index * CALENDAR_CONFIG.slotMinutes,
+    {
+      length: Math.ceil(
+        (configuredEndMinutes - configuredStartMinutes) /
+          CALENDAR_CONFIG.slotMinutes,
+      ),
+    },
+    (_, index) =>
+      configuredStartMinutes + index * CALENDAR_CONFIG.slotMinutes,
   );
+  const timeTicks = Array.from(
+    { length: Math.floor((endMinutes - startMinutes) / 60) + 1 },
+    (_, index) => startMinutes + index * 60,
+  );
+  if (timeTicks.at(-1) !== endMinutes) timeTicks.push(endMinutes);
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
@@ -262,6 +314,7 @@ function AdminDailyCalendarDesktop({
                 </p>
                 <p className="truncate text-xs text-slate-500">
                   {doctor.specialization || "Врач"}
+                  {!doctor.active && " · неактивен"}
                 </p>
               </div>
             ))}
@@ -276,23 +329,27 @@ function AdminDailyCalendarDesktop({
               className="relative border-r border-slate-200 bg-slate-50"
               style={{ height: totalHeight }}
             >
-              {Array.from(
-                { length: (endMinutes - startMinutes) / 60 + 1 },
-                (_, index) => (
-                  <span
-                    key={index}
-                    className={cn(
-                      "absolute right-3 text-xs text-slate-500",
-                      index !== 0 && "-translate-y-1/2",
-                    )}
-                    style={{
-                      top: index === 0 ? 4 : index * CALENDAR_CONFIG.hourHeight,
-                    }}
-                  >
-                    {minutesToTime(startMinutes + index * 60)}
-                  </span>
-                ),
-              )}
+              {timeTicks.map((minutes, index) => (
+                <span
+                  key={minutes}
+                  className={cn(
+                    "absolute right-3 text-xs text-slate-500",
+                    index !== 0 &&
+                      (index === timeTicks.length - 1
+                        ? "-translate-y-full"
+                        : "-translate-y-1/2"),
+                  )}
+                  style={{
+                    top:
+                      index === 0
+                        ? 4
+                        : ((minutes - startMinutes) / 60) *
+                          CALENDAR_CONFIG.hourHeight,
+                  }}
+                >
+                  {minutesToTime(minutes)}
+                </span>
+              ))}
             </div>
             {doctors.map((doctor) => (
               <DoctorDayColumn
@@ -305,8 +362,9 @@ function AdminDailyCalendarDesktop({
                 slots={slots}
                 startMinutes={startMinutes}
                 totalHeight={totalHeight}
-                workdayEnd={workdayEnd}
-                onSlot={openSlot}
+                calendarEndMinutes={endMinutes}
+                onSlot={doctor.active ? openSlot : undefined}
+                canBookSlot={canBookSlot}
                 onAppointment={openAppointment}
               />
             ))}
@@ -325,6 +383,7 @@ function AdminDailyAgendaMobile({
   selectedDoctor,
   setSelectedDoctor,
   openSlot,
+  canBookSlot,
   openAppointment,
 }: {
   date: string;
@@ -335,6 +394,7 @@ function AdminDailyAgendaMobile({
   selectedDoctor: number | null;
   setSelectedDoctor: (id: number | null) => void;
   openSlot: (doctorId: number, minutes: number) => void;
+  canBookSlot: (minutes: number) => boolean;
   openAppointment: (id: number) => void;
 }) {
   const visible = appointments
@@ -343,13 +403,13 @@ function AdminDailyAgendaMobile({
     )
     .sort((a, b) => a.startTime.localeCompare(b.startTime));
   const doctor = doctors.find((item) => item.id === selectedDoctor);
-  const free = doctor
+  const free = doctor?.active
     ? availableStarts(
         appointments.filter((item) => item.doctorId === doctor.id),
         CALENDAR_CONFIG.fallbackDurationMinutes,
         workdayStart,
         workdayEnd,
-      ).slice(0, 10)
+      ).filter(canBookSlot).slice(0, 10)
     : [];
   return (
     <div className="space-y-4 pb-32">
@@ -372,7 +432,7 @@ function AdminDailyAgendaMobile({
           ))}
         </div>
       </div>
-      {doctor && (
+      {doctor?.active && (
         <Card className="p-4">
           <div className="flex items-center gap-2">
             <Clock3 size={18} className="text-brand-700" />
@@ -503,8 +563,9 @@ function DoctorDayColumn({
   slots,
   startMinutes,
   totalHeight,
-  workdayEnd,
+  calendarEndMinutes,
   onSlot,
+  canBookSlot,
   onAppointment,
 }: {
   doctor: Doctor;
@@ -513,8 +574,9 @@ function DoctorDayColumn({
   slots: number[];
   startMinutes: number;
   totalHeight: number;
-  workdayEnd: string;
-  onSlot: (doctorId: number, minutes: number) => void;
+  calendarEndMinutes: number;
+  onSlot?: (doctorId: number, minutes: number) => void;
+  canBookSlot: (minutes: number) => boolean;
   onAppointment: (id: number) => void;
 }) {
   return (
@@ -522,7 +584,7 @@ function DoctorDayColumn({
       className="relative border-r border-slate-200 last:border-r-0"
       style={{ height: totalHeight }}
     >
-      {slots.map((minutes) => (
+      {onSlot && slots.filter(canBookSlot).map((minutes) => (
         <button
           key={minutes}
           onClick={() => onSlot(doctor.id, minutes)}
@@ -544,18 +606,21 @@ function DoctorDayColumn({
         );
         const height = Math.max(
           30,
-          ((Math.min(end, timeToMinutes(workdayEnd)) -
+          ((Math.min(end, calendarEndMinutes) -
             Math.max(start, startMinutes)) /
             60) *
             CALENDAR_CONFIG.hourHeight,
         );
+        const overlapping = connectedOverlaps(item, appointments);
+        const lane = overlapping.findIndex((other) => other.id === item.id);
+        const laneCount = overlapping.length;
         const muted = item.status === "CANCELLED" || item.status === "NO_SHOW";
         return (
           <button
             key={item.id}
             onClick={() => onAppointment(item.id)}
             className={cn(
-              "absolute inset-x-1 z-10 overflow-hidden rounded-md border px-2 py-1.5 text-left shadow-sm hover:brightness-95",
+              "absolute z-10 overflow-hidden rounded-md border px-2 py-1.5 text-left shadow-sm hover:brightness-95",
               muted
                 ? "border-slate-300 bg-slate-100 text-slate-500 opacity-80"
                 : item.status === "IN_PROGRESS"
@@ -564,7 +629,12 @@ function DoctorDayColumn({
                     ? "border-emerald-300 bg-emerald-100 text-emerald-950"
                     : "border-blue-300 bg-blue-100 text-blue-950",
             )}
-            style={{ top, height }}
+            style={{
+              top,
+              height,
+              left: `calc(${(lane * 100) / laneCount}% + 4px)`,
+              width: `calc(${100 / laneCount}% - 8px)`,
+            }}
           >
             <p
               className={cn(
@@ -585,6 +655,34 @@ function DoctorDayColumn({
       })}
     </div>
   );
+}
+
+function connectedOverlaps(seed: Appointment, source: Appointment[]) {
+  const ids = new Set([seed.id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidate of source) {
+      if (ids.has(candidate.id)) continue;
+      const candidateStart = minutesInBishkek(candidate.startTime);
+      const candidateEnd = minutesInBishkek(candidate.endTime);
+      const touchesGroup = source.some((member) => {
+        if (!ids.has(member.id)) return false;
+        const memberStart = minutesInBishkek(member.startTime);
+        const memberEnd = minutesInBishkek(member.endTime);
+        return candidateStart < memberEnd && candidateEnd > memberStart;
+      });
+      if (touchesGroup) {
+        ids.add(candidate.id);
+        changed = true;
+      }
+    }
+  }
+  return source
+    .filter((item) => ids.has(item.id))
+    .sort(
+      (a, b) => a.startTime.localeCompare(b.startTime) || a.id - b.id,
+    );
 }
 
 function minutesInBishkek(value: string) {
