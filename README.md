@@ -96,8 +96,7 @@ Configure the Vercel project with:
 - Root Directory: `frontend`
 - Build Command: `npm run build`
 - Output Directory: `dist`
-- Environment variable: `VITE_API_URL=https://your-backend-origin.example`
 
-`frontend/vercel.json` provides the React Router SPA fallback. API traffic is sent directly to `VITE_API_URL`; it is not rewritten through Vercel.
+`frontend/vercel.json` rewrites same-origin `/api/*` requests to the Render backend before applying the React Router SPA fallback. No `VITE_API_URL` environment variable is required.
 
-Cross-origin session authentication requires HTTPS, credentialed CORS, and secure `SameSite=None` cookies. Prefer sibling custom domains under the same parent domain for the frontend and backend to avoid browser third-party-cookie restrictions.
+The browser sends session and CSRF traffic to the Vercel frontend origin; Vercel proxies those requests to the backend over HTTPS.

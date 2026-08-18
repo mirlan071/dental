@@ -12,15 +12,10 @@ export class ApiError extends Error {
 
 let csrf: { token: string; headerName: string } | null = null;
 const mutationMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const apiBaseUrl = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
-
-function apiUrl(path: string) {
-  return `${apiBaseUrl}${path}`;
-}
 
 async function csrfToken() {
   if (!csrf) {
-    const response = await fetch(apiUrl("/api/auth/csrf"), {
+    const response = await fetch("/api/auth/csrf", {
       credentials: "include",
     });
     if (!response.ok) throw await toError(response);
@@ -65,7 +60,7 @@ export async function api<T>(
     const token = await csrfToken();
     headers.set(token.headerName, token.token);
   }
-  const response = await fetch(apiUrl(path), {
+  const response = await fetch(path, {
     ...options,
     method,
     headers,
